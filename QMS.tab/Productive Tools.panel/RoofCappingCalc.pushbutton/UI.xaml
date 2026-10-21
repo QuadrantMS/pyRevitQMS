@@ -1,0 +1,89 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Duct Frame Capping Calculator" Width="520" Height="680"
+        WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
+        Background="#F5F5F5" FontFamily="Segoe UI">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- 1. Duct Dimensions -->
+        <GroupBox Header="1. Duct Dimensions (mm)" Grid.Row="0" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,5,0">
+                    <TextBlock Text="Width (Side Facing The Sky):" FontSize="11" Margin="0,0,0,2" FontWeight="Normal"/>
+                    <TextBox Name="tb_Width" Height="26" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="5,0,0,0">
+                    <TextBlock Text="Height:" FontSize="11" Margin="0,0,0,2" FontWeight="Normal"/>
+                    <TextBox Name="tb_Height" Height="26" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
+                </StackPanel>
+                <!-- Select Duct Button -->
+                <Button Name="btn_SelectDuct" Content="SELECT DUCT" Grid.Column="2" Width="95" Height="26" Margin="10,16,0,0"
+                        Background="#8E44AD" Foreground="White" FontWeight="Bold" BorderThickness="0" VerticalAlignment="Bottom"/>
+            </Grid>
+        </GroupBox>
+
+        <!-- 2. Frame Size -->
+        <GroupBox Header="2. Frame Size (mm)" Grid.Row="1" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
+            <StackPanel>
+                <TextBlock Text="Frame Size:" FontSize="11" Margin="0,0,0,2" FontWeight="Normal"/>
+                <TextBox Name="tb_FrameSize" Height="26" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- 3. Quantities -->
+        <GroupBox Header="3. Number of Frames Requiring Capping" Grid.Row="2" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,5,0">
+                    <TextBlock Text="Horizontal (3-Sides) Count:" FontSize="11" Margin="0,0,0,2" FontWeight="Normal"/>
+                    <TextBox Name="tb_CountHoriz" Height="26" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="5,0,0,0">
+                    <TextBlock Text="Vertical (Riser 4-Sides) Count:" FontSize="11" Margin="0,0,0,2" FontWeight="Normal"/>
+                    <TextBox Name="tb_CountVert" Height="26" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
+                </StackPanel>
+            </Grid>
+        </GroupBox>
+
+        <!-- Action Buttons -->
+        <Grid Grid.Row="3" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button Name="btn_Calculate" Content="CALCULATE" Grid.Column="0" Height="36" Margin="0,0,6,0"
+                    Background="#2ECC71" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+            <Button Name="btn_Sum" Content="SUM ALL TOTALS" Grid.Column="1" Width="120" Height="36" Margin="0,0,6,0"
+                    Background="#3498DB" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+            <Button Name="btn_Clear" Content="CLEAR HISTORY" Grid.Column="2" Width="110" Height="36" Margin="0,0,6,0"
+                    Background="#E74C3C" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+            <Button Name="btn_Close" Content="CLOSE" Grid.Column="3" Width="75" Height="36"
+                    Background="#D3D3D3" Foreground="#333333" FontWeight="Bold" BorderThickness="0"/>
+        </Grid>
+
+        <!-- 4. Result History Area -->
+        <GroupBox Header="Calculation History (Saved Across Sessions)" Grid.Row="4" Margin="0,0,0,0" Padding="8" FontWeight="SemiBold">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                <TextBlock Name="tb_History" Text="No calculations run yet..." FontFamily="Consolas" FontSize="11" FontWeight="Normal" Foreground="#333333"/>
+            </ScrollViewer>
+        </GroupBox>
+    </Grid>
+</Window>

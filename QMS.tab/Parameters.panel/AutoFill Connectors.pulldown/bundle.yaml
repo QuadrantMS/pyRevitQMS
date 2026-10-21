@@ -1,0 +1,7 @@
+Tooltip: "Automatically assign ConnectorC1Type and ConnectorC2Type for round ducts."
+Title: "AutoFill Connectors"
+Author: "Ky Ha"
+Layout:
+  - Active View Spiros
+  - Selected Spiros
+  - Piece Info

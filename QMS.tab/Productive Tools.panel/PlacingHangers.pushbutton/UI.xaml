@@ -1,0 +1,93 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Place Duct Hangers" Height="500" Width="440"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        Background="#F5F5F5" FontFamily="Segoe UI">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 1. Category & Family Selection -->
+        <GroupBox Header="1. Select Hanger Family" Grid.Row="0" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
+            <StackPanel>
+                <TextBlock Text="Category Filter:" FontSize="11" Margin="0,0,0,4" FontWeight="Normal"/>
+                <ComboBox Name="cb_Category" Height="26" VerticalContentAlignment="Center" Margin="0,0,0,8">
+                    <ComboBoxItem Content="Duct Accessories" IsSelected="True"/>
+                    <ComboBoxItem Content="Pipe Accessories"/>
+                    <ComboBoxItem Content="Generic Models"/>
+                </ComboBox>
+
+                <TextBlock Text="Hanger Family Symbol (Type to search):" FontSize="11" Margin="0,0,0,4" FontWeight="Normal"/>
+                <ComboBox Name="cb_FamilySymbol" Height="26" VerticalContentAlignment="Center" IsEditable="True" IsTextSearchEnabled="False"/>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- 2. Dimensions & Offsets Input -->
+        <GroupBox Header="2. Hanger Parameters (mm)" Grid.Row="1" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,4,6">
+                    <TextBlock Text="A = Hanger Spacing:" FontSize="11" FontWeight="Normal"/>
+                    <TextBox Name="tb_ParamA" Text="1500" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="0" Grid.Column="1" Margin="4,0,0,6">
+                    <TextBlock Text="B = Bottom Gap:" FontSize="11" FontWeight="Normal"/>
+                    <TextBox Name="tb_ParamB" Text="0" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,0,4,6">
+                    <TextBlock Text="C = Side Gap:" FontSize="11" FontWeight="Normal"/>
+                    <TextBox Name="tb_ParamC" Text="100" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Grid.Column="1" Margin="4,0,0,6">
+                    <TextBlock Text="D = Rod Offset Left:" FontSize="11" FontWeight="Normal"/>
+                    <TextBox Name="tb_ParamD" Text="50" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Grid.Column="0" Margin="0,0,4,6">
+                    <TextBlock Text="E = Rod Offset Right:" FontSize="11" FontWeight="Normal"/>
+                    <TextBox Name="tb_ParamE" Text="50" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Grid.Column="1" Margin="4,0,0,6">
+                    <TextBlock Text="F = Rod Ext. Bottom:" FontSize="11" FontWeight="Normal"/>
+                    <TextBox Name="tb_ParamF" Text="50" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,0,4,0">
+                    <TextBlock Text="G = Rod Ext. Top (Above Slab):" FontSize="11" FontWeight="Normal"/>
+                    <TextBox Name="tb_ParamG" Text="0" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
+                </StackPanel>
+            </Grid>
+        </GroupBox>
+
+        <!-- 3. Action Buttons -->
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button Name="btn_PickElements" Content="SELECT DUCTS" Grid.Column="0" Height="36" Margin="0,0,8,0"
+                    Background="#2ECC71" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+            <Button Name="btn_Cancel" Content="CANCEL" Grid.Column="1" Width="80" Height="36"
+                    Background="#D3D3D3" Foreground="#333333" FontWeight="Bold" BorderThickness="0"/>
+        </Grid>
+    </Grid>
+</Window>

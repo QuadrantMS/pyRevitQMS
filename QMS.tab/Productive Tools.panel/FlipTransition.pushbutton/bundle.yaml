@@ -1,0 +1,6 @@
+title: "Transition\n(Flipped)"
+tooltip: "Create a MEP transition with flipped connectors (Swaps Connector 1 <-> Connector 2).
+      1. Select first object (pick a location close to the desired connector)
+      2. Select second object (pick a location close to the desired connector)"
+help_url: "https://www.youtube.com/watch?v=C2PZgXclG0Y"
+author: "QMS_SL"

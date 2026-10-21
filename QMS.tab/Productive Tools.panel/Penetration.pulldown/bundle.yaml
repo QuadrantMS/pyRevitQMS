@@ -1,0 +1,8 @@
+Tooltip: "Automatically addin Penetration Family."
+Title: "AutoAddPeno"
+Author: "S Lung"
+Layout:
+  - Wall Penetration
+  - Floor Penetration
+  - Roof Penetration
+  - Ceiling Penetration
