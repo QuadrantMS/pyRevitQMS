@@ -54,7 +54,7 @@
 
                 <StackPanel Grid.Row="0" Grid.Column="0" Margin="0,0,4,6">
                     <TextBlock Text="A = Hanger Spacing:" FontSize="11" FontWeight="Normal"/>
-                    <TextBox Name="tb_ParamA" Text="1500" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
+                    <TextBox Name="tb_ParamA" Text="1000" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0"/>
                 </StackPanel>
 
                 <StackPanel Grid.Row="0" Grid.Column="1" Margin="4,0,0,6">
@@ -93,12 +93,15 @@
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <Button Name="btn_PickElements" Content="SELECT DUCTS" Grid.Column="0" Height="36" Margin="0,0,8,0"
+            <Button Name="btn_PickElements" Content="PICK DUCTS" Grid.Column="0" Height="36" Margin="0,0,4,0"
                     Background="#2ECC71" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
-            <Button Name="btn_Cancel" Content="CANCEL" Grid.Column="1" Width="80" Height="36"
+            <Button Name="btn_PickRun" Content="PICK START &amp; END" Grid.Column="1" Height="36" Margin="2,0,4,0"
+                    Background="#007ACC" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+            <Button Name="btn_Cancel" Content="CANCEL" Grid.Column="2" Width="75" Height="36"
                     Background="#D3D3D3" Foreground="#333333" FontWeight="Bold" BorderThickness="0"/>
         </Grid>
     </Grid>
