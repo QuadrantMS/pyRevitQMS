@@ -85,7 +85,7 @@ def find_path_between_ducts(start_duct, end_duct):
     of ducts and fittings strictly between start_duct and end_duct.
     """
     if start_duct.Id == end_duct.Id:
-        return [start_duct]
+        return [(start_duct, None)]
 
     queue = [[(start_duct, None)]]
     visited = set([start_duct.Id])
@@ -118,19 +118,31 @@ def get_all_levels():
     )
 
 def get_mep_reference_level(elem, placement_z=None):
+    """
+    Retrieves the exact Reference Level assigned to the MEP element.
+    Explicitly prioritizes parameters to prevent re-assignment on low elevations.
+    """
+    p_ref = elem.get_Parameter(DB.BuiltInParameter.RBS_START_LEVEL_PARAM)
+    if p_ref and p_ref.AsElementId() != DB.ElementId.InvalidElementId:
+        ref_lvl = doc.GetElement(p_ref.AsElementId())
+        if ref_lvl:
+            return ref_lvl
+
+    p_ref_named = elem.LookupParameter("Reference Level")
+    if p_ref_named and p_ref_named.AsElementId() != DB.ElementId.InvalidElementId:
+        ref_lvl = doc.GetElement(p_ref_named.AsElementId())
+        if ref_lvl:
+            return ref_lvl
+
+    if hasattr(elem, "LevelId") and elem.LevelId != DB.ElementId.InvalidElementId:
+        ref_lvl = doc.GetElement(elem.LevelId)
+        if ref_lvl:
+            return ref_lvl
+
     if placement_z is not None:
         levels = get_all_levels()
         if levels:
-            closest = min(levels, key=lambda lvl: abs(lvl.Elevation - placement_z))
-            if closest:
-                return closest
-
-    p_ref = elem.get_Parameter(DB.BuiltInParameter.RBS_START_LEVEL_PARAM)
-    if p_ref and p_ref.AsElementId() != DB.ElementId.InvalidElementId:
-        return doc.GetElement(p_ref.AsElementId())
-
-    if elem.LevelId != DB.ElementId.InvalidElementId:
-        return doc.GetElement(elem.LevelId)
+            return min(levels, key=lambda lvl: abs(lvl.Elevation - placement_z))
 
     if hasattr(doc.ActiveView, "GenLevel") and doc.ActiveView.GenLevel:
         return doc.ActiveView.GenLevel
