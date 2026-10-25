@@ -8,6 +8,12 @@ clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
 clr.AddReference('PresentationFramework')
 clr.AddReference('PresentationCore')
+clr.AddReference('System.Drawing')
+clr.AddReference('WindowsBase')
+
+import System.Drawing
+import System.IO
+import System.Windows.Media.Imaging
 
 from pyrevit import revit, DB, forms, script
 from Autodesk.Revit.UI import Selection
@@ -79,24 +85,26 @@ class DuctHangerUI(forms.WPFWindow):
 
         # Bind events
         self.cb_Category.SelectionChanged += self.OnCategoryChanged
+        self.cb_FamilySymbol.SelectionChanged += self.OnFamilySelectionChanged
         self.cb_FamilySymbol.KeyUp += self.OnFamilyComboKeyUp
         self.btn_PickElements.Click += self.OnPickElements
         self.btn_Cancel.Click += self.OnCancel
 
-        self.populate_symbols()
         self.load_user_defaults()
+        self.populate_symbols()
+        self.UpdatePreview()
 
     def get_selected_category_bic(self):
-        if not self.cb_Category.SelectedItem:
-            return DB.BuiltInCategory.OST_DuctAccessory
-        cat_str = self.cb_Category.Text
-        if "Pipe" in cat_str:
-            return DB.BuiltInCategory.OST_PipeAccessory
-        elif "Generic" in cat_str:
-            return DB.BuiltInCategory.OST_GenericModel
+        selected_item = self.cb_Category.SelectedItem
+        if selected_item:
+            cat_str = str(selected_item.Content) if hasattr(selected_item, "Content") else str(selected_item)
+            if "Pipe" in cat_str:
+                return DB.BuiltInCategory.OST_PipeAccessory
+            elif "Generic" in cat_str:
+                return DB.BuiltInCategory.OST_GenericModel
         return DB.BuiltInCategory.OST_DuctAccessory
 
-    def populate_symbols(self):
+    def populate_symbols(self, reset_text=False):
         bic = self.get_selected_category_bic()
         symbols = DB.FilteredElementCollector(doc)\
                     .OfCategory(bic)\
@@ -112,6 +120,10 @@ class DuctHangerUI(forms.WPFWindow):
             self.all_symbol_names.append(display_name)
 
         self.all_symbol_names.sort()
+
+        if reset_text:
+            self.cb_FamilySymbol.Text = ""
+
         self.filter_combobox("")
 
     def filter_combobox(self, query):
@@ -128,7 +140,6 @@ class DuctHangerUI(forms.WPFWindow):
         
         self.cb_FamilySymbol.Text = current_text
         
-        # Maintain cursor position at end of text
         try:
             tb = self.cb_FamilySymbol.Template.FindName("PART_EditableTextBox", self.cb_FamilySymbol)
             if tb:
@@ -136,13 +147,48 @@ class DuctHangerUI(forms.WPFWindow):
         except Exception:
             pass
 
+    def UpdatePreview(self, target_name=None):
+        """ Extracts the selected Revit Family 3D preview and injects it into the WPF UI """
+        sym_name = target_name or str(self.cb_FamilySymbol.SelectedItem or self.cb_FamilySymbol.Text)
+
+        if sym_name and sym_name in self.symbol_map:
+            symbol = self.symbol_map[sym_name]
+            try:
+                size = System.Drawing.Size(120, 120)
+                bmp = symbol.GetPreviewImage(size)
+                if bmp:
+                    ms = System.IO.MemoryStream()
+                    bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
+                    ms.Position = 0
+                    
+                    bi = System.Windows.Media.Imaging.BitmapImage()
+                    bi.BeginInit()
+                    bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad
+                    bi.StreamSource = ms
+                    bi.EndInit()
+                    bi.Freeze()
+                    
+                    self.img_Preview.Source = bi
+                else:
+                    self.img_Preview.Source = None
+            except Exception:
+                self.img_Preview.Source = None
+        else:
+            self.img_Preview.Source = None
+
+    def OnFamilySelectionChanged(self, sender, args):
+        if self.cb_FamilySymbol.SelectedItem:
+            selected_str = str(self.cb_FamilySymbol.SelectedItem)
+            self.UpdatePreview(target_name=selected_str)
+
     def OnFamilyComboKeyUp(self, sender, args):
-        # Ignore navigation keys
         if args.Key.ToString() not in ["Up", "Down", "Enter", "Escape", "Tab"]:
             self.filter_combobox(self.cb_FamilySymbol.Text)
+        self.UpdatePreview()
 
     def OnCategoryChanged(self, sender, args):
-        self.populate_symbols()
+        self.populate_symbols(reset_text=True)
+        self.UpdatePreview()
 
     def load_user_defaults(self):
         try:
@@ -157,10 +203,13 @@ class DuctHangerUI(forms.WPFWindow):
             # Load last chosen category
             last_cat = cfg.get_option("last_category", "Duct Accessories")
             for item in self.cb_Category.Items:
-                if item.Content.ToString() == last_cat:
+                if str(item.Content) == last_cat:
                     self.cb_Category.SelectedItem = item
                     break
-                    
+
+            # Populate symbols for loaded category before setting last symbol
+            self.populate_symbols(reset_text=False)
+
             # Load last chosen family symbol
             last_sym = cfg.get_option("last_symbol", None)
             if last_sym and last_sym in self.symbol_map:
@@ -179,7 +228,8 @@ class DuctHangerUI(forms.WPFWindow):
             cfg.set_option("param_f", self.tb_ParamF.Text)
             cfg.set_option("param_g", self.tb_ParamG.Text)
             
-            cfg.set_option("last_category", self.cb_Category.Text)
+            if self.cb_Category.SelectedItem:
+                cfg.set_option("last_category", str(self.cb_Category.SelectedItem.Content))
             cfg.set_option("last_symbol", self.cb_FamilySymbol.Text)
             
             script.save_config()
