@@ -80,10 +80,6 @@ def get_connectors(elem):
     return []
 
 def find_path_between_ducts(start_duct, end_duct):
-    """
-    Breadth-First Search (BFS) to find the shortest connected path 
-    of ducts and fittings strictly between start_duct and end_duct.
-    """
     if start_duct.Id == end_duct.Id:
         return [(start_duct, None)]
 
@@ -118,10 +114,6 @@ def get_all_levels():
     )
 
 def get_mep_reference_level(elem, placement_z=None):
-    """
-    Retrieves the exact Reference Level assigned to the MEP element.
-    Explicitly prioritizes parameters to prevent re-assignment on low elevations.
-    """
     p_ref = elem.get_Parameter(DB.BuiltInParameter.RBS_START_LEVEL_PARAM)
     if p_ref and p_ref.AsElementId() != DB.ElementId.InvalidElementId:
         ref_lvl = doc.GetElement(p_ref.AsElementId())
@@ -192,7 +184,6 @@ class DuctHangerUI(forms.WPFWindow):
 
         self.load_user_defaults()
         self.populate_symbols()
-        self.UpdatePreview()
 
     def get_selected_category_bic(self):
         selected_item = self.cb_Category.SelectedItem
@@ -247,51 +238,20 @@ class DuctHangerUI(forms.WPFWindow):
         except Exception:
             pass
 
-    def UpdatePreview(self, target_name=None):
-        sym_name = target_name or str(self.cb_FamilySymbol.SelectedItem or self.cb_FamilySymbol.Text)
-
-        if sym_name and sym_name in self.symbol_map:
-            symbol = self.symbol_map[sym_name]
-            try:
-                size = System.Drawing.Size(120, 120)
-                bmp = symbol.GetPreviewImage(size)
-                if bmp:
-                    ms = System.IO.MemoryStream()
-                    bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
-                    ms.Position = 0
-                    
-                    bi = System.Windows.Media.Imaging.BitmapImage()
-                    bi.BeginInit()
-                    bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad
-                    bi.StreamSource = ms
-                    bi.EndInit()
-                    bi.Freeze()
-                    
-                    self.img_Preview.Source = bi
-                else:
-                    self.img_Preview.Source = None
-            except Exception:
-                self.img_Preview.Source = None
-        else:
-            self.img_Preview.Source = None
-
     def OnFamilySelectionChanged(self, sender, args):
-        if self.cb_FamilySymbol.SelectedItem:
-            selected_str = str(self.cb_FamilySymbol.SelectedItem)
-            self.UpdatePreview(target_name=selected_str)
+        pass
 
     def OnFamilyComboKeyUp(self, sender, args):
         if args.Key.ToString() not in ["Up", "Down", "Enter", "Escape", "Tab"]:
             self.filter_combobox(self.cb_FamilySymbol.Text)
-        self.UpdatePreview()
 
     def OnCategoryChanged(self, sender, args):
         self.populate_symbols(reset_text=True)
-        self.UpdatePreview()
 
     def load_user_defaults(self):
         try:
-            self.tb_ParamA.Text = cfg.get_option("param_a", "1000")
+            self.tb_FirstHangerOffset.Text = cfg.get_option("first_offset", "500")
+            self.tb_ParamA.Text = cfg.get_option("param_a", "1500")
             self.tb_ParamB.Text = cfg.get_option("param_b", "0")
             self.tb_ParamC.Text = cfg.get_option("param_c", "100")
             self.tb_ParamD.Text = cfg.get_option("param_d", "50")
@@ -316,6 +276,7 @@ class DuctHangerUI(forms.WPFWindow):
 
     def save_user_defaults(self):
         try:
+            cfg.set_option("first_offset", self.tb_FirstHangerOffset.Text)
             cfg.set_option("param_a", self.tb_ParamA.Text)
             cfg.set_option("param_b", self.tb_ParamB.Text)
             cfg.set_option("param_c", self.tb_ParamC.Text)
@@ -340,6 +301,7 @@ class DuctHangerUI(forms.WPFWindow):
         self.selected_symbol = self.symbol_map[sym_name]
 
         try:
+            self.inputs['FirstOffset'] = mm_to_feet(float(self.tb_FirstHangerOffset.Text))
             self.inputs['A'] = mm_to_feet(float(self.tb_ParamA.Text))
             self.inputs['B'] = mm_to_feet(float(self.tb_ParamB.Text))
             self.inputs['C'] = mm_to_feet(float(self.tb_ParamC.Text))
@@ -349,6 +311,10 @@ class DuctHangerUI(forms.WPFWindow):
             self.inputs['G'] = mm_to_feet(float(self.tb_ParamG.Text))
         except ValueError:
             forms.alert("Please enter valid numeric inputs for all parameters.")
+            return False
+
+        if self.inputs['FirstOffset'] < 0:
+            forms.alert("First Hanger Offset cannot be negative.")
             return False
 
         if self.inputs['A'] <= 0:
@@ -395,7 +361,6 @@ if win.action_mode == "PICK_RUN":
         )
         end_duct = doc.GetElement(ref_end.ElementId)
 
-        # Store pick point for single-duct anchor evaluation
         if start_duct.Id == end_duct.Id:
             single_duct_pick_pt = ref_start.GlobalPoint
 
@@ -424,6 +389,7 @@ if not target_path:
 all_levels = get_all_levels()
 symbol = win.selected_symbol
 spacing = win.inputs['A']
+first_offset = win.inputs['FirstOffset']
 
 t = DB.Transaction(doc, "Place Continuous Duct Hangers")
 t.Start()
@@ -432,7 +398,9 @@ if not symbol.IsActive:
     symbol.Activate()
 
 total_placed = 0
-dist_since_last = 0.0
+
+# Initialized so the first hanger is placed at the specified offset
+dist_since_last = spacing - first_offset
 
 # Process continuous placement along the identified path sequence
 for idx, node in enumerate(target_path):
@@ -457,7 +425,6 @@ for idx, node in enumerate(target_path):
                 if dist_to_end < dist_to_start:
                     eval_reverse = True
             elif single_duct_pick_pt and len(target_path) == 1:
-                # If picking a single duct, determine starting end based on cursor click location
                 dist_to_start = single_duct_pick_pt.DistanceTo(start_pt)
                 dist_to_end = single_duct_pick_pt.DistanceTo(end_pt)
                 if dist_to_end < dist_to_start:
