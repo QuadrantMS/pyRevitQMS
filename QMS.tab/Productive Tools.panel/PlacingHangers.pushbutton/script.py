@@ -381,6 +381,7 @@ if not win.action_mode:
     sys.exit()
 
 target_path = []
+single_duct_pick_pt = None
 
 if win.action_mode == "PICK_RUN":
     try:
@@ -390,9 +391,13 @@ if win.action_mode == "PICK_RUN":
         start_duct = doc.GetElement(ref_start.ElementId)
 
         ref_end = uidoc.Selection.PickObject(
-            Selection.ObjectType.Element, DuctSelectionFilter(), "2. Select END Duct of the run."
+            Selection.ObjectType.Element, DuctSelectionFilter(), "2. Select END Duct of the run (Click the SAME duct if single)."
         )
         end_duct = doc.GetElement(ref_end.ElementId)
+
+        # Store pick point for single-duct anchor evaluation
+        if start_duct.Id == end_duct.Id:
+            single_duct_pick_pt = ref_start.GlobalPoint
 
         path_nodes = find_path_between_ducts(start_duct, end_duct)
         if not path_nodes:
@@ -449,6 +454,12 @@ for idx, node in enumerate(target_path):
             if entry_conn:
                 dist_to_start = entry_conn.Origin.DistanceTo(start_pt)
                 dist_to_end = entry_conn.Origin.DistanceTo(end_pt)
+                if dist_to_end < dist_to_start:
+                    eval_reverse = True
+            elif single_duct_pick_pt and len(target_path) == 1:
+                # If picking a single duct, determine starting end based on cursor click location
+                dist_to_start = single_duct_pick_pt.DistanceTo(start_pt)
+                dist_to_end = single_duct_pick_pt.DistanceTo(end_pt)
                 if dist_to_end < dist_to_start:
                     eval_reverse = True
 
