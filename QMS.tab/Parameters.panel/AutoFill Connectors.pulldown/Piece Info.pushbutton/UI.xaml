@@ -47,10 +47,10 @@
             </Grid.ColumnDefinitions>
 
             <Button x:Name="btn_PickElements" Content="PICK ELEMENTS" Grid.Column="0" Height="34" Margin="0,0,3,0" 
-                    Background="#D9534F" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+                    Background="#4fd97d" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
             
             <Button x:Name="btn_PickRun" Content="PICK RUN" Grid.Column="1" Height="34" Margin="3,0,3,0" 
-                    Background="#D9534F" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+                    Background="#4fd97d" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
             
             <Button x:Name="btn_ActiveView" Content="ENTIRE ACTIVE VIEW" Grid.Column="2" Height="34" Margin="3,0,3,0" 
                     Background="#0275D8" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
