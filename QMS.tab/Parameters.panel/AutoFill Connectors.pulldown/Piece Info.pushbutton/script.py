@@ -19,17 +19,17 @@ uidoc = __revit__.ActiveUIDocument
 PARAM_ADDITIONAL_INFO = "QMS_Duct_Additional_Info"
 PARAM_MATERIAL = "QMS_Duct_Material"
 PARAM_SPECIFICATION = "QMS_Duct_Specification"
+PARAM_LENGTH_ADDITIONAL = "QMS_Duct_Length_Additional"
 
 # CONFIG KEYS FOR PYREVIT CONFIG MANAGER
 CFG_KEY_INFO = "last_additional_info"
 CFG_KEY_MAT = "last_material"
 CFG_KEY_SPEC = "last_specification"
+CFG_KEY_LEN = "last_length_additional"
 
 
 # 1. SELECTION FILTER
 class DuctAndFittingSelectionFilter(ISelectionFilter):
-    """Filters viewport selection strictly to Ducts and Duct Fittings."""
-
     def AllowElement(self, element):
         if element.Category:
             cat_id = element.Category.Id.IntegerValue
@@ -46,22 +46,30 @@ class DuctAndFittingSelectionFilter(ISelectionFilter):
 
 # 2. HELPER TO UPDATE PARAMETERS ON SINGLE ELEMENT
 def update_element_parameters(
-    element, val_info, val_mat, val_spec, transaction_msg="Autofill Piece Info"
+    element, val_info, val_mat, val_spec, val_len_internal, transaction_msg="Autofill Piece Info"
 ):
     """Writes values to target parameters wrapped in a Revit Transaction."""
     p_info = element.LookupParameter(PARAM_ADDITIONAL_INFO)
     p_mat = element.LookupParameter(PARAM_MATERIAL)
     p_spec = element.LookupParameter(PARAM_SPECIFICATION)
+    p_len = element.LookupParameter(PARAM_LENGTH_ADDITIONAL)
 
-    if p_info or p_mat or p_spec:
+    if p_info or p_mat or p_spec or p_len:
         t = Transaction(doc, transaction_msg)
         t.Start()
+        
+        # Text Parameters
         if p_info and not p_info.IsReadOnly:
             p_info.Set(val_info)
         if p_mat and not p_mat.IsReadOnly:
             p_mat.Set(val_mat)
         if p_spec and not p_spec.IsReadOnly:
             p_spec.Set(val_spec)
+            
+        # Length Parameter (Requires Double)
+        if p_len and not p_len.IsReadOnly and val_len_internal is not None:
+            p_len.Set(val_len_internal)
+            
         t.Commit()
         return True
     return False
@@ -69,7 +77,6 @@ def update_element_parameters(
 
 # 3. HELPER TO GET CONNECTED NEIGHBORS
 def get_connected_neighbors(element):
-    """Retrieves physically connected Duct, Fitting, or Accessory neighbors."""
     neighbors = []
     conn_mgr = None
 
@@ -109,7 +116,6 @@ def get_connected_neighbors(element):
 
 # 4. PATHFINDING ALGORITHM (BFS)
 def find_path_between_elements(start_elem, end_elem):
-    """Finds connected path between start_elem and end_elem using BFS."""
     queue = deque([[start_elem.Id]])
     visited = {start_elem.Id}
 
@@ -147,10 +153,12 @@ class PieceInfoWindow(forms.WPFWindow):
         self.txt_AdditionalInfo.Text = self.cfg.get_option(CFG_KEY_INFO, "")
         self.txt_Material.Text = self.cfg.get_option(CFG_KEY_MAT, "")
         self.txt_Specification.Text = self.cfg.get_option(CFG_KEY_SPEC, "")
+        self.txt_LengthAdditional.Text = self.cfg.get_option(CFG_KEY_LEN, "")
 
         self.additional_info = ""
         self.material = ""
         self.specification = ""
+        self.length_additional_internal = None # Internal feet value
 
         # Event Handlers Wiring
         self.btn_PickElements.Click += self.on_pick_elements
@@ -158,40 +166,54 @@ class PieceInfoWindow(forms.WPFWindow):
         self.btn_ActiveView.Click += self.on_active_view
         self.btn_Cancel.Click += self.on_cancel
 
-    def on_pick_elements(self, sender, e):
-        self.action_type = "PICK_ELEMENTS"
-        self._save_inputs_and_close()
-
-    def on_pick_run(self, sender, e):
-        self.action_type = "PICK_RUN"
-        self._save_inputs_and_close()
-
-    def on_active_view(self, sender, e):
-        self.action_type = "ACTIVE_VIEW"
-        self._save_inputs_and_close()
-
-    def on_cancel(self, sender, e):
-        self.action_type = "CANCEL"
-        self.Close()
-
-    def _save_inputs_and_close(self):
-        # Read text values from UI
+    def process_inputs(self):
+        """Reads inputs, validates Length, and saves to config."""
         self.additional_info = self.txt_AdditionalInfo.Text
         self.material = self.txt_Material.Text
         self.specification = self.txt_Specification.Text
+        len_str = self.txt_LengthAdditional.Text.strip()
+        
+        self.length_additional_internal = None
+        if len_str:
+            try:
+                len_mm = float(len_str)
+                # Convert mm to internal decimal feet
+                self.length_additional_internal = len_mm / 304.8
+            except ValueError:
+                forms.alert("Invalid input for Length. Please enter a valid number.", title="Error")
+                return False
 
         # Save to pyRevit User Config
         self.cfg.set_option(CFG_KEY_INFO, self.additional_info)
         self.cfg.set_option(CFG_KEY_MAT, self.material)
         self.cfg.set_option(CFG_KEY_SPEC, self.specification)
+        self.cfg.set_option(CFG_KEY_LEN, len_str)
         script.save_config()
+        
+        return True
 
+    def on_pick_elements(self, sender, e):
+        if self.process_inputs():
+            self.action_type = "PICK_ELEMENTS"
+            self.Close()
+
+    def on_pick_run(self, sender, e):
+        if self.process_inputs():
+            self.action_type = "PICK_RUN"
+            self.Close()
+
+    def on_active_view(self, sender, e):
+        if self.process_inputs():
+            self.action_type = "ACTIVE_VIEW"
+            self.Close()
+
+    def on_cancel(self, sender, e):
+        self.action_type = "CANCEL"
         self.Close()
 
 
 # 6. ACTION EXECUTION FUNCTIONS
-def execute_pick_elements_live(val_info, val_mat, val_spec):
-    """Continuous pick mode: Updates element immediately upon click until ESC is pressed."""
+def execute_pick_elements_live(val_info, val_mat, val_spec, val_len):
     filter_inst = DuctAndFittingSelectionFilter()
     count = 0
 
@@ -209,6 +231,7 @@ def execute_pick_elements_live(val_info, val_mat, val_spec):
                 val_info,
                 val_mat,
                 val_spec,
+                val_len,
                 "Autofill Single Piece Info",
             ):
                 count += 1
@@ -226,8 +249,7 @@ def execute_pick_elements_live(val_info, val_mat, val_spec):
         )
 
 
-def execute_pick_run(val_info, val_mat, val_spec):
-    """Pick start and end elements, then update path."""
+def execute_pick_run(val_info, val_mat, val_spec, val_len):
     filter_inst = DuctAndFittingSelectionFilter()
 
     try:
@@ -276,6 +298,7 @@ def execute_pick_run(val_info, val_mat, val_spec):
             p_info = el.LookupParameter(PARAM_ADDITIONAL_INFO)
             p_mat = el.LookupParameter(PARAM_MATERIAL)
             p_spec = el.LookupParameter(PARAM_SPECIFICATION)
+            p_len_param = el.LookupParameter(PARAM_LENGTH_ADDITIONAL)
 
             if p_info and not p_info.IsReadOnly:
                 p_info.Set(val_info)
@@ -283,6 +306,8 @@ def execute_pick_run(val_info, val_mat, val_spec):
                 p_mat.Set(val_mat)
             if p_spec and not p_spec.IsReadOnly:
                 p_spec.Set(val_spec)
+            if p_len_param and not p_len_param.IsReadOnly and val_len is not None:
+                p_len_param.Set(val_len)
             updated_count += 1
 
     t.Commit()
@@ -296,8 +321,7 @@ def execute_pick_run(val_info, val_mat, val_spec):
     )
 
 
-def execute_active_view(val_info, val_mat, val_spec):
-    """Collects and updates all Ducts and Duct Fittings in the active view."""
+def execute_active_view(val_info, val_mat, val_spec, val_len):
     active_view_id = doc.ActiveView.Id
 
     categories = System.Collections.Generic.List[BuiltInCategory]()
@@ -320,14 +344,17 @@ def execute_active_view(val_info, val_mat, val_spec):
         p_info = elem.LookupParameter(PARAM_ADDITIONAL_INFO)
         p_mat = elem.LookupParameter(PARAM_MATERIAL)
         p_spec = elem.LookupParameter(PARAM_SPECIFICATION)
+        p_len_param = elem.LookupParameter(PARAM_LENGTH_ADDITIONAL)
 
-        if p_info or p_mat or p_spec:
+        if p_info or p_mat or p_spec or p_len_param:
             if p_info and not p_info.IsReadOnly:
                 p_info.Set(val_info)
             if p_mat and not p_mat.IsReadOnly:
-                p_mat.Set(val_spec)
+                p_mat.Set(val_mat)
             if p_spec and not p_spec.IsReadOnly:
                 p_spec.Set(val_spec)
+            if p_len_param and not p_len_param.IsReadOnly and val_len is not None:
+                p_len_param.Set(val_len)
             updated_count += 1
 
     t.Commit()
@@ -347,9 +374,9 @@ win.show_dialog()
 
 if win.action_type == "PICK_ELEMENTS":
     execute_pick_elements_live(
-        win.additional_info, win.material, win.specification
+        win.additional_info, win.material, win.specification, win.length_additional_internal
     )
 elif win.action_type == "PICK_RUN":
-    execute_pick_run(win.additional_info, win.material, win.specification)
+    execute_pick_run(win.additional_info, win.material, win.specification, win.length_additional_internal)
 elif win.action_type == "ACTIVE_VIEW":
-    execute_active_view(win.additional_info, win.material, win.specification)
+    execute_active_view(win.additional_info, win.material, win.specification, win.length_additional_internal)
