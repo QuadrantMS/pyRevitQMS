@@ -174,7 +174,7 @@ class DuctHangerUI(forms.WPFWindow):
         self.selected_symbol = None
         self.inputs = {}
 
-        # Bind events
+        # Bind events dynamically in Python to avoid XAML binding errors
         self.cb_Category.SelectionChanged += self.OnCategoryChanged
         self.cb_FamilySymbol.SelectionChanged += self.OnFamilySelectionChanged
         self.cb_FamilySymbol.KeyUp += self.OnFamilyComboKeyUp
@@ -184,6 +184,7 @@ class DuctHangerUI(forms.WPFWindow):
 
         self.load_user_defaults()
         self.populate_symbols()
+        self.UpdatePreview() 
 
     def get_selected_category_bic(self):
         selected_item = self.cb_Category.SelectedItem
@@ -238,15 +239,47 @@ class DuctHangerUI(forms.WPFWindow):
         except Exception:
             pass
 
+    def UpdatePreview(self, target_name=None):
+        sym_name = target_name or str(self.cb_FamilySymbol.SelectedItem or self.cb_FamilySymbol.Text)
+
+        if sym_name and sym_name in self.symbol_map:
+            symbol = self.symbol_map[sym_name]
+            try:
+                size = System.Drawing.Size(120, 120)
+                bmp = symbol.GetPreviewImage(size)
+                if bmp:
+                    ms = System.IO.MemoryStream()
+                    bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png)
+                    ms.Position = 0
+                    
+                    bi = System.Windows.Media.Imaging.BitmapImage()
+                    bi.BeginInit()
+                    bi.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad
+                    bi.StreamSource = ms
+                    bi.EndInit()
+                    bi.Freeze()
+                    
+                    self.img_Preview.Source = bi
+                else:
+                    self.img_Preview.Source = None
+            except Exception:
+                self.img_Preview.Source = None
+        else:
+            self.img_Preview.Source = None
+
     def OnFamilySelectionChanged(self, sender, args):
-        pass
+        if self.cb_FamilySymbol.SelectedItem:
+            selected_str = str(self.cb_FamilySymbol.SelectedItem)
+            self.UpdatePreview(target_name=selected_str)
 
     def OnFamilyComboKeyUp(self, sender, args):
         if args.Key.ToString() not in ["Up", "Down", "Enter", "Escape", "Tab"]:
             self.filter_combobox(self.cb_FamilySymbol.Text)
+        self.UpdatePreview()
 
     def OnCategoryChanged(self, sender, args):
         self.populate_symbols(reset_text=True)
+        self.UpdatePreview()
 
     def load_user_defaults(self):
         try:
@@ -347,7 +380,6 @@ if not win.action_mode:
     sys.exit()
 
 target_path = []
-single_duct_pick_pt = None
 
 if win.action_mode == "PICK_RUN":
     try:
@@ -361,15 +393,16 @@ if win.action_mode == "PICK_RUN":
         )
         end_duct = doc.GetElement(ref_end.ElementId)
 
-        if start_duct.Id == end_duct.Id:
-            single_duct_pick_pt = ref_start.GlobalPoint
-
         path_nodes = find_path_between_ducts(start_duct, end_duct)
         if not path_nodes:
             forms.alert("Could not find a connected run between the selected Start and End ducts.")
             sys.exit()
         
-        target_path = path_nodes
+        for i, node in enumerate(path_nodes):
+            if i == 0:
+                target_path.append((node[0], node[1], ref_start.GlobalPoint))
+            else:
+                target_path.append((node[0], node[1], None))
 
     except Exception:
         sys.exit()
@@ -379,7 +412,7 @@ else:
         refs = uidoc.Selection.PickObjects(
             Selection.ObjectType.Element, DuctSelectionFilter(), "Select Ducts to place hangers. Click FINISH in top bar."
         )
-        target_path = [(doc.GetElement(r.ElementId), None) for r in refs]
+        target_path = [(doc.GetElement(r.ElementId), None, r.GlobalPoint) for r in refs]
     except Exception:
         sys.exit()
 
@@ -398,14 +431,15 @@ if not symbol.IsActive:
     symbol.Activate()
 
 total_placed = 0
-
-# Initialized so the first hanger is placed at the specified offset
 dist_since_last = spacing - first_offset
 
-# Process continuous placement along the identified path sequence
 for idx, node in enumerate(target_path):
+    if win.action_mode == "PICK_ELEMENTS":
+        dist_since_last = spacing - first_offset
+
     current = node[0] if isinstance(node, tuple) else node
-    entry_conn = node[1] if isinstance(node, tuple) else None
+    entry_conn = node[1] if isinstance(node, tuple) and len(node) > 1 else None
+    click_pt = node[2] if isinstance(node, tuple) and len(node) > 2 else None
 
     cat_id = current.Category.Id.IntegerValue
 
@@ -414,21 +448,31 @@ for idx, node in enumerate(target_path):
         if isinstance(loc_curve, DB.LocationCurve):
             curve = loc_curve.Curve
             length = curve.Length
+            
+            if length < 0.01:
+                continue
 
             start_pt = curve.GetEndPoint(0)
             end_pt = curve.GetEndPoint(1)
-            eval_reverse = False
 
+            # Default anchor is start point
+            anchor_pt = start_pt
+            far_pt = end_pt
+
+            # Hard evaluation of the correct starting anchor end using purely 2D flattened distance mapping
             if entry_conn:
-                dist_to_start = entry_conn.Origin.DistanceTo(start_pt)
-                dist_to_end = entry_conn.Origin.DistanceTo(end_pt)
-                if dist_to_end < dist_to_start:
-                    eval_reverse = True
-            elif single_duct_pick_pt and len(target_path) == 1:
-                dist_to_start = single_duct_pick_pt.DistanceTo(start_pt)
-                dist_to_end = single_duct_pick_pt.DistanceTo(end_pt)
-                if dist_to_end < dist_to_start:
-                    eval_reverse = True
+                if entry_conn.Origin.DistanceTo(end_pt) < entry_conn.Origin.DistanceTo(start_pt):
+                    anchor_pt = end_pt
+                    far_pt = start_pt
+            elif click_pt:
+                # Flatten Z to 0 so plan view cuts do not artificially throw off the 3D distance check
+                flat_click = DB.XYZ(click_pt.X, click_pt.Y, 0)
+                flat_start = DB.XYZ(start_pt.X, start_pt.Y, 0)
+                flat_end = DB.XYZ(end_pt.X, end_pt.Y, 0)
+                
+                if flat_click.DistanceTo(flat_end) < flat_click.DistanceTo(flat_start):
+                    anchor_pt = end_pt
+                    far_pt = start_pt
 
             next_hanger_dist = spacing - dist_since_last
 
@@ -455,13 +499,14 @@ for idx, node in enumerate(target_path):
                 top_offset = base_offset + mm_to_feet(1000.0)
 
             hanger_width = duct_w + (win.inputs['C'] * 2.0)
-            dir_vec = (end_pt - start_pt).Normalize()
+            
+            # Explicit Vector calculation completely avoids curve bounds/parameter bugs
+            dir_vec = (far_pt - anchor_pt).Normalize()
             angle_rad = math.atan2(dir_vec.Y, dir_vec.X) + (math.pi / 2.0)
 
             while next_hanger_dist <= length:
-                eval_dist = length - next_hanger_dist if eval_reverse else next_hanger_dist
-                safe_param = max(0.001, min(0.999, eval_dist / length))
-                place_pt = curve.Evaluate(safe_param, True)
+                # Math offset directly applied to anchor vector
+                place_pt = anchor_pt + (dir_vec * next_hanger_dist)
 
                 inst = doc.Create.NewFamilyInstance(place_pt, symbol, ref_level, DB.Structure.StructuralType.NonStructural)
 
@@ -491,7 +536,7 @@ for idx, node in enumerate(target_path):
     elif cat_id == int(DB.BuiltInCategory.OST_DuctFitting) and entry_conn:
         if idx + 1 < len(target_path):
             next_node = target_path[idx + 1]
-            next_ref = next_node[1] if isinstance(next_node, tuple) else None
+            next_ref = next_node[1] if isinstance(next_node, tuple) and len(next_node) > 1 else None
             if next_ref:
                 fitting_len = entry_conn.Origin.DistanceTo(next_ref.Origin)
                 dist_since_last += fitting_len
