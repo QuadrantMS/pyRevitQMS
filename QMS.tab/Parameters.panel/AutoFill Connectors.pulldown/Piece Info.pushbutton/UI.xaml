@@ -53,7 +53,7 @@
                     Background="#4fd97d" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
             
             <Button x:Name="btn_ActiveView" Content="ENTIRE ACTIVE VIEW" Grid.Column="2" Height="34" Margin="3,0,3,0" 
-                    Background="#0275D8" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+                    Background="#d80202" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
             
             <Button x:Name="btn_Cancel" Content="CANCEL" Grid.Column="3" Height="34" Margin="3,0,0,0" 
                     Background="#E0E0E0" Foreground="#333333" FontWeight="Bold" BorderThickness="0"/>
