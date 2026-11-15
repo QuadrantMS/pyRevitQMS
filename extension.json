@@ -1,0 +1,15 @@
+{
+    "default_enabled": "True",
+    "builtin": "False",
+    "enable": "True",
+    "type": "extension",
+    "rocket_mode_compatible": "True",
+    "name": "QMS",
+    "description": "A set of tools for QMS Users",
+    "author": "Sherman Lung / Ky Ha",
+    "author_profile": "https://github.com/shermanlung",
+    "url": "https://github.com/QuadrantMS/pyRevitQMS.git",
+    "website": "https://www.quadrantms.com.au/",
+    "image" : "",
+    "dependencies": []
+}
