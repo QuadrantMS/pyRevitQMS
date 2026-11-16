@@ -1,3 +1,6 @@
-Tooltip: "Automatically assign ConnectorC1Type and ConnectorC2Type for selected round ducts."
+tooltip: |
+  Automatically assign ConnectorC1Type and ConnectorC2Type for selected round ducts:
+  If connected to Round Joiner, assign "Joiner" to one end & "RE" to the opposite end (forming an RE–Joiner–RE sequence).
+  For all other connections (including Round Bends, accessories), assign "RE".
 Title: "Selected Spiros"
 Author: "Ky Ha"
