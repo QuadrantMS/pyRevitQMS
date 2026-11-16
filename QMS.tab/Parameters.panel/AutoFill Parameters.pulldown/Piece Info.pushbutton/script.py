@@ -30,6 +30,8 @@ CFG_KEY_LEN = "last_length_additional"
 
 # 1. SELECTION FILTER
 class DuctAndFittingSelectionFilter(ISelectionFilter):
+    """Restricts viewport selection strictly to Ducts and Duct Fittings."""
+
     def AllowElement(self, element):
         if element.Category:
             cat_id = element.Category.Id.IntegerValue
@@ -66,7 +68,7 @@ def update_element_parameters(
         if p_spec and not p_spec.IsReadOnly:
             p_spec.Set(val_spec)
             
-        # Length Parameter (Requires Double)
+        # Length Parameter (Requires Double in internal decimal feet)
         if p_len and not p_len.IsReadOnly and val_len_internal is not None:
             p_len.Set(val_len_internal)
             
@@ -77,6 +79,7 @@ def update_element_parameters(
 
 # 3. HELPER TO GET CONNECTED NEIGHBORS
 def get_connected_neighbors(element):
+    """Retrieves physically connected Duct, Fitting, or Accessory neighbors."""
     neighbors = []
     conn_mgr = None
 
@@ -116,6 +119,7 @@ def get_connected_neighbors(element):
 
 # 4. PATHFINDING ALGORITHM (BFS)
 def find_path_between_elements(start_elem, end_elem):
+    """Finds the shortest connected path between start_elem and end_elem using BFS."""
     queue = deque([[start_elem.Id]])
     visited = {start_elem.Id}
 
@@ -158,7 +162,7 @@ class PieceInfoWindow(forms.WPFWindow):
         self.additional_info = ""
         self.material = ""
         self.specification = ""
-        self.length_additional_internal = None # Internal feet value
+        self.length_additional_internal = None  # Internal feet value
 
         # Event Handlers Wiring
         self.btn_PickElements.Click += self.on_pick_elements
@@ -167,7 +171,7 @@ class PieceInfoWindow(forms.WPFWindow):
         self.btn_Cancel.Click += self.on_cancel
 
     def process_inputs(self):
-        """Reads inputs, validates Length, and saves to config."""
+        """Reads inputs, validates Length, and saves to user-local config."""
         self.additional_info = self.txt_AdditionalInfo.Text
         self.material = self.txt_Material.Text
         self.specification = self.txt_Specification.Text
@@ -214,6 +218,7 @@ class PieceInfoWindow(forms.WPFWindow):
 
 # 6. ACTION EXECUTION FUNCTIONS
 def execute_pick_elements_live(val_info, val_mat, val_spec, val_len):
+    """Continuous pick mode: Updates element immediately upon click until ESC is pressed."""
     filter_inst = DuctAndFittingSelectionFilter()
     count = 0
 
@@ -250,6 +255,7 @@ def execute_pick_elements_live(val_info, val_mat, val_spec, val_len):
 
 
 def execute_pick_run(val_info, val_mat, val_spec, val_len):
+    """Prompts user to pick Start and End elements, then updates the connected path."""
     filter_inst = DuctAndFittingSelectionFilter()
 
     try:
@@ -322,6 +328,7 @@ def execute_pick_run(val_info, val_mat, val_spec, val_len):
 
 
 def execute_active_view(val_info, val_mat, val_spec, val_len):
+    """Collects and updates all Ducts and Duct Fittings in the active view after confirmation."""
     active_view_id = doc.ActiveView.Id
 
     categories = System.Collections.Generic.List[BuiltInCategory]()
@@ -336,11 +343,40 @@ def execute_active_view(val_info, val_mat, val_spec, val_len):
         .WhereElementIsNotElementType()
     )
 
+    target_elements = list(collector)
+
+    # 1. Check if the active view contains any target elements
+    if not target_elements:
+        forms.alert(
+            "No ducts or duct fittings found in the Active View.",
+            title="Warning",
+            warn_icon=True,
+        )
+        return
+
+    # 2. Confirmation warning pop-up before modifying elements
+    confirm_msg = (
+        "WARNING: You are about to overwrite Piece Info parameters for {} duct(s) and fitting(s) in:\n"
+        "• Active View: {}\n\n"
+        "Do you want to proceed?"
+    ).format(len(target_elements), doc.ActiveView.Name)
+
+    user_choice = forms.alert(
+        confirm_msg,
+        title="Confirm Entire Active View",
+        options=["Yes", "No"],
+        warn_icon=True,
+    )
+
+    if user_choice != "Yes":
+        return
+
+    # 3. Execute Transaction to update parameters
     updated_count = 0
     t = Transaction(doc, "Autofill Active View Piece Info")
     t.Start()
 
-    for elem in collector:
+    for elem in target_elements:
         p_info = elem.LookupParameter(PARAM_ADDITIONAL_INFO)
         p_mat = elem.LookupParameter(PARAM_MATERIAL)
         p_spec = elem.LookupParameter(PARAM_SPECIFICATION)

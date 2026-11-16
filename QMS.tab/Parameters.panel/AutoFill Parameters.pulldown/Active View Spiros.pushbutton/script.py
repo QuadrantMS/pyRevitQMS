@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from pyrevit import forms
+from pyrevit import forms, script
 from Autodesk.Revit.DB import FilteredElementCollector, BuiltInParameter, Transaction
 from Autodesk.Revit.DB.Mechanical import Duct
 
@@ -32,7 +32,7 @@ for duct in duct_candidates:
             if type_param and type_param.AsString():
                 processed_types.add(type_param.AsString())
 
-# 2. Validation & Execution
+# 2. Validation & Warning Confirmation
 if not target_ducts:
     forms.alert("No matching round ducts found in Active View.", title="Warning", warn_icon=True)
 else:
@@ -40,6 +40,24 @@ else:
     if not sample_duct.LookupParameter(PARAM_C1) or not sample_duct.LookupParameter(PARAM_C2):
         forms.alert("Project is missing required Shared Parameters!", title="Error", warn_icon=True)
     else:
+        # Warning pop-up asking user to verify before modifying elements
+        confirm_msg = (
+            "WARNING: You are about to overwrite connector parameters for {} round duct(s) in Active View:\n"
+            "• View Name: {}\n\n"
+            "Do you want to proceed?"
+        ).format(len(target_ducts), active_view.Name)
+
+        user_choice = forms.alert(
+            confirm_msg,
+            title="Confirm AutoFill Connectors",
+            options=["Yes", "No"],
+            warn_icon=True
+        )
+
+        if user_choice != "Yes":
+            script.exit()
+
+        # 3. Execution
         processed_joiners = set()
         updated_count = 0
         joiner_count = 0
