@@ -17,13 +17,15 @@ doc = revit.doc
 uidoc = revit.uidoc
 
 # ==============================================================================
-# SET LOCKED CATEGORY FOR THIS SPECIFIC BUTTON:
-# Options: "Walls", "Floors", "Roofs", or "Ceilings"
+# TOOL CONFIGURATION (CEILING PENETRATION ONLY)
 # ==============================================================================
 LOCKED_HOST_CATEGORY_NAME = "Ceilings"
+IS_FLOOR_TOOL = False
+IS_WALL_TOOL = False
+IS_CEILING_TOOL = True
 
 CURRENT_MODEL_OPTION = "<Current Active Model>"
-MEP_CATEGORIES = [
+BASE_MEP_CATEGORIES = [
     DB.BuiltInCategory.OST_DuctCurves,
     DB.BuiltInCategory.OST_PipeCurves,
     DB.BuiltInCategory.OST_DuctAccessory,
@@ -32,14 +34,12 @@ MEP_CATEGORIES = [
     DB.BuiltInCategory.OST_PipeFitting
 ]
 
-# Separate config storage key per button category
-CFG_KEY = "PenetrationGeneratorSettings_{}".format(LOCKED_HOST_CATEGORY_NAME)
+CFG_KEY = "PenetrationGeneratorSettings_v4_{}".format(LOCKED_HOST_CATEGORY_NAME)
 cfg = script.get_config(CFG_KEY)
 
 
-# --- CROSS-VERSION UNIT HELPER ---
+# --- UNIT HELPERS ---
 def mm_to_feet(mm_val):
-    """ Converts millimeters to internal Revit feet across API versions """
     try:
         if hasattr(DB, "UnitUtils") and hasattr(DB, "UnitTypeId"):
             return DB.UnitUtils.ConvertToInternalUnits(mm_val, DB.UnitTypeId.Millimeters)
@@ -50,31 +50,38 @@ def mm_to_feet(mm_val):
     return float(mm_val) / 304.8
 
 
-def is_union_fitting(elem):
-    """ Thoroughly checks if an element is a Duct or Pipe Union fitting """
+def feet_to_mm(ft_val):
     try:
-        # Check 1: MEPModel PartType on FamilyInstance (Most reliable for fittings)
+        if hasattr(DB, "UnitUtils") and hasattr(DB, "UnitTypeId"):
+            return DB.UnitUtils.ConvertFromInternalUnits(ft_val, DB.UnitTypeId.Millimeters)
+        elif hasattr(DB, "DisplayUnitType"):
+            return DB.UnitUtils.ConvertFromInternalUnits(ft_val, DB.DisplayUnitType.DUT_MILLIMETERS)
+    except Exception:
+        pass
+    return float(ft_val) * 304.8
+
+
+def is_union_fitting(elem):
+    try:
         if hasattr(elem, "MEPModel") and elem.MEPModel:
             if hasattr(elem.MEPModel, "PartType"):
                 part_type = elem.MEPModel.PartType
                 if str(part_type) == "Union" or int(part_type) == 7:
                     return True
 
-        # Check 2: Family Part Type Parameter
         if hasattr(elem, "Symbol") and elem.Symbol and hasattr(elem.Symbol, "Family"):
             fam = elem.Symbol.Family
             p_part_type = fam.get_Parameter(DB.BuiltInParameter.FAMILY_CONTENT_PART_TYPE)
             if p_part_type:
-                val_str = p_part_type.AsValueString() or p_part_type.AsAsString() or ""
+                val_str = p_part_type.AsValueString() or p_part_type.AsString() or ""
                 if "union" in val_str.lower() or p_part_type.AsInteger() == 7:
                     return True
 
-        # Check 3: Element Type Parameter fallback
         elem_type = elem.Document.GetElement(elem.GetTypeId())
         if elem_type:
             p_part_type = elem_type.LookupParameter("Part Type") or elem_type.get_Parameter(DB.BuiltInParameter.FAMILY_CONTENT_PART_TYPE)
             if p_part_type:
-                val_str = p_part_type.AsValueString() or p_part_type.AsAsString() or ""
+                val_str = p_part_type.AsValueString() or p_part_type.AsString() or ""
                 if "union" in val_str.lower() or p_part_type.AsInteger() == 7:
                     return True
     except Exception:
@@ -82,21 +89,37 @@ def is_union_fitting(elem):
     return False
 
 
+def is_penetration_instance(elem, peno_symbol_ids):
+    """ Prevents Generic Model scanning from picking up existing Penetration families """
+    try:
+        if not elem or not elem.Category:
+            return False
+        if elem.Category.Id.IntegerValue != int(DB.BuiltInCategory.OST_GenericModel):
+            return False
+        if elem.GetTypeId() in peno_symbol_ids:
+            return True
+        if elem.LookupParameter("BarrierThickness") is not None or elem.LookupParameter("Barrier Thickness") is not None:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 # --- SELECTION FILTER ---
 class MEPSelectionFilter(Selection.ISelectionFilter):
+    def __init__(self, allowed_categories, peno_symbol_ids):
+        self.allowed_cat_ids = [int(c) for c in allowed_categories]
+        self.peno_symbol_ids = peno_symbol_ids
+
     def AllowElement(self, elem):
         if not elem or not elem.Category:
             return False
-        
-        elem_cat_id = elem.Category.Id.IntegerValue
-        mep_cat_ids = [int(c) for c in MEP_CATEGORIES]
-        if elem_cat_id not in mep_cat_ids:
+        if elem.Category.Id.IntegerValue not in self.allowed_cat_ids:
             return False
-
-        # Exclude Duct & Pipe Union fittings during manual pick
         if is_union_fitting(elem):
             return False
-
+        if is_penetration_instance(elem, self.peno_symbol_ids):
+            return False
         return True
 
     def AllowReference(self, reference, point):
@@ -107,64 +130,68 @@ class MEPSelectionFilter(Selection.ISelectionFilter):
 class PenetrationUI(forms.WPFWindow):
     def __init__(self, xaml_file_name):
         forms.WPFWindow.__init__(self, xaml_file_name)
-        
+
         self.mode = None
         self.target_doc = None
         self.target_link_inst = None
-        self.selected_category_bic = None
+        self.selected_category_bic = DB.BuiltInCategory.OST_Ceilings
         self.type_filter_keyword = ""
 
-        self.config = {
-            "RECT": {"symbol": None, "offset_feet": 0.0, "rotation_rad": 0.0},
-            "ROUND_DUCT": {"symbol": None, "offset_feet": 0.0, "rotation_rad": 0.0},
-            "PIPE": {"symbol": None, "offset_feet": 0.0, "rotation_rad": 0.0}
-        }
+        self.enable_mep = True
+        self.enable_air_terminal = True
+        self.enable_generic_model = False
 
-        self.lock_category_selection()
+        self.config = {}
+
+        self.btn_PickElements.Click += self.OnPickElements
+        self.btn_EntireView.Click += self.OnEntireView
+        self.btn_Cancel.Click += self.OnCancel
+
+        self.chk_EnableMep.Checked += self.OnScopeChanged
+        self.chk_EnableMep.Unchecked += self.OnScopeChanged
+        self.chk_EnableAirTerminal.Checked += self.OnScopeChanged
+        self.chk_EnableAirTerminal.Unchecked += self.OnScopeChanged
+        self.chk_EnableGenericModel.Checked += self.OnScopeChanged
+        self.chk_EnableGenericModel.Unchecked += self.OnScopeChanged
+
+        self.cb_SymbolRect.KeyUp += self.OnComboKeyUp
+        self.cb_SymbolRoundDuct.KeyUp += self.OnComboKeyUp
+        self.cb_SymbolPipe.KeyUp += self.OnComboKeyUp
+        self.cb_SymbolGenericModel.KeyUp += self.OnComboKeyUp
+        self.cb_SymbolAirTerminalRect.KeyUp += self.OnComboKeyUp
+        self.cb_SymbolAirTerminalRound.KeyUp += self.OnComboKeyUp
+
         self.populate_models()
         self.populate_symbols()
         self.load_user_defaults()
-
-    def lock_category_selection(self):
-        """ Automatically selects and locks the Category ComboBox in UI """
-        for item in self.cb_Category.Items:
-            if item.Content.ToString() == LOCKED_HOST_CATEGORY_NAME:
-                self.cb_Category.SelectedItem = item
-                break
+        self.sync_ui_states()
 
     def populate_models(self):
-        """ Safely populates active model and loaded linked models without crashing on unloaded links """
         self.cb_LinkModel.Items.Add(CURRENT_MODEL_OPTION)
         self.model_map = {CURRENT_MODEL_OPTION: (doc, None)}
 
         try:
-            links = DB.FilteredElementCollector(doc)\
-                      .OfClass(DB.RevitLinkInstance)\
-                      .ToElements()
-
+            links = DB.FilteredElementCollector(doc).OfClass(DB.RevitLinkInstance).ToElements()
             for l in links:
                 try:
                     l_doc = l.GetLinkDocument()
                     if not l_doc:
                         continue
-
                     raw_name = l.GetName() if hasattr(l, "GetName") else l_doc.Title
                     clean_name = raw_name.split(" : ")[0]
                     display_name = "[LINK] " + clean_name
-
                     counter = 1
                     base_display_name = display_name
                     while display_name in self.model_map:
                         display_name = "{} ({})".format(base_display_name, counter)
                         counter += 1
-
                     self.model_map[display_name] = (l_doc, l)
                     self.cb_LinkModel.Items.Add(display_name)
                 except Exception:
                     pass
         except Exception:
             pass
-            
+
         self.cb_LinkModel.SelectedIndex = 0
 
     def populate_symbols(self):
@@ -172,20 +199,71 @@ class PenetrationUI(forms.WPFWindow):
                     .OfCategory(DB.BuiltInCategory.OST_GenericModel)\
                     .OfClass(DB.FamilySymbol)\
                     .ToElements()
-        
+
         self.symbol_map = {
-            "{} : {}".format(s.Family.Name, DB.Element.Name.__get__(s)): s 
+            "{} : {}".format(s.Family.Name, DB.Element.Name.__get__(s)): s
             for s in symbols
         }
         self.all_symbol_names = sorted(self.symbol_map.keys())
 
-        for cb in [self.cb_SymbolRect, self.cb_SymbolRoundDuct, self.cb_SymbolPipe]:
+        combos = [
+            self.cb_SymbolRect, self.cb_SymbolRoundDuct, self.cb_SymbolPipe,
+            self.cb_SymbolAirTerminalRect, self.cb_SymbolAirTerminalRound,
+            self.cb_SymbolGenericModel
+        ]
+        for cb in combos:
             self.filter_combobox(cb, "", set_drop_open=False)
 
+    def auto_match_qms_symbol(self, shape_keywords):
+        host_kw = "ceiling"
+        best_match = None
+        for name in self.all_symbol_names:
+            low = name.lower()
+            if "peno" in low and host_kw in low:
+                if any(sk in low for sk in shape_keywords):
+                    if "qms" in low:
+                        return name
+                    if not best_match:
+                        best_match = name
+        return best_match
+
+    def set_rotation_combo(self, cb_rot, rot_text):
+        for item in cb_rot.Items:
+            if rot_text and rot_text.split("°")[0] in item.Content.ToString():
+                cb_rot.SelectedItem = item
+                break
+
+    def sync_ui_states(self):
+        mep_en = bool(self.chk_EnableMep.IsChecked)
+        self.cb_SymbolRect.IsEnabled = mep_en
+        self.tb_OffsetRect.IsEnabled = mep_en
+        self.cb_RotationRect.IsEnabled = mep_en
+        self.cb_SymbolRoundDuct.IsEnabled = mep_en
+        self.tb_OffsetRoundDuct.IsEnabled = mep_en
+        self.cb_RotationRoundDuct.IsEnabled = mep_en
+        self.cb_SymbolPipe.IsEnabled = mep_en
+        self.tb_OffsetPipe.IsEnabled = mep_en
+        self.cb_RotationPipe.IsEnabled = mep_en
+
+        at_en = bool(self.chk_EnableAirTerminal.IsChecked)
+        self.cb_SymbolAirTerminalRect.IsEnabled = at_en
+        self.tb_OffsetAirTerminal.IsEnabled = at_en
+        self.cb_RotationAirTerminalRect.IsEnabled = at_en
+        self.cb_SymbolAirTerminalRound.IsEnabled = at_en
+        self.tb_OffsetAirTerminalRound.IsEnabled = at_en
+        self.cb_RotationAirTerminalRound.IsEnabled = at_en
+
+        gm_en = bool(self.chk_EnableGenericModel.IsChecked)
+        self.cb_SymbolGenericModel.IsEnabled = gm_en
+        self.tb_OffsetGenericModel.IsEnabled = gm_en
+        self.cb_RotationGenericModel.IsEnabled = gm_en
+
+    def OnScopeChanged(self, sender, args):
+        self.sync_ui_states()
+
     def load_user_defaults(self):
-        """ Restores settings specific to this button category """
+        missing_required_symbol = False
         try:
-            # Restore saved host model selection; fallback to Current Active Model if missing/not found
             last_model = cfg.get_option("last_host_model", None)
             if last_model and str(last_model) in self.model_map:
                 self.cb_LinkModel.SelectedItem = str(last_model)
@@ -196,55 +274,71 @@ class PenetrationUI(forms.WPFWindow):
             if last_type_kw is not None:
                 self.tb_TypeFilterKeyword.Text = str(last_type_kw)
 
+            self.chk_EnableMep.IsChecked = bool(cfg.get_option("last_enable_mep", True))
+            self.chk_EnableAirTerminal.IsChecked = bool(cfg.get_option("last_enable_at", True))
+            self.chk_EnableGenericModel.IsChecked = bool(cfg.get_option("last_enable_gm", False))
+
             fields = [
-                ("rect", self.cb_SymbolRect, self.tb_OffsetRect, self.cb_RotationRect),
-                ("rduct", self.cb_SymbolRoundDuct, self.tb_OffsetRoundDuct, self.cb_RotationRoundDuct),
-                ("pipe", self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe)
+                ("rect", self.cb_SymbolRect, self.tb_OffsetRect, self.cb_RotationRect, ["square", "rect"], True),
+                ("rduct", self.cb_SymbolRoundDuct, self.tb_OffsetRoundDuct, self.cb_RotationRoundDuct, ["round", "circ"], True),
+                ("pipe", self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe, ["round", "pipe", "circ"], True),
+                ("at_rect", self.cb_SymbolAirTerminalRect, self.tb_OffsetAirTerminal, self.cb_RotationAirTerminalRect, ["square", "rect"], True),
+                ("at_round", self.cb_SymbolAirTerminalRound, self.tb_OffsetAirTerminalRound, self.cb_RotationAirTerminalRound, ["round", "circ"], True),
+                ("gm", self.cb_SymbolGenericModel, self.tb_OffsetGenericModel, self.cb_RotationGenericModel, ["square", "rect"], False),
             ]
 
-            for key, cb_sym, tb_off, cb_rot in fields:
+            for key, cb_sym, tb_off, cb_rot, shape_kws, is_primary in fields:
                 sym = cfg.get_option("last_sym_" + key, None)
                 if sym and sym in self.symbol_map:
                     cb_sym.Text = sym
+                else:
+                    auto_sym = self.auto_match_qms_symbol(shape_kws)
+                    if auto_sym:
+                        cb_sym.Text = auto_sym
+                    elif is_primary:
+                        missing_required_symbol = True
 
-                off = cfg.get_option("last_off_" + key, None)
+                off = cfg.get_option("last_overall_off_" + key, None)
                 if off:
                     tb_off.Text = str(off)
 
                 rot = cfg.get_option("last_rot_" + key, None)
                 if rot:
-                    self.set_rotation_combo(cb_rot, rot)
+                    self.set_rotation_combo(cb_rot, str(rot))
+
+            if missing_required_symbol:
+                self.exp_AdvancedSettings.IsExpanded = True
         except Exception:
             pass
 
     def save_user_defaults(self):
-        """ Saves settings specific to this button category """
         try:
             if self.cb_LinkModel.SelectedItem:
                 cfg.set_option("last_host_model", str(self.cb_LinkModel.SelectedItem))
 
             cfg.set_option("last_type_kw", self.tb_TypeFilterKeyword.Text)
+            cfg.set_option("last_enable_mep", bool(self.chk_EnableMep.IsChecked))
+            cfg.set_option("last_enable_at", bool(self.chk_EnableAirTerminal.IsChecked))
+            cfg.set_option("last_enable_gm", bool(self.chk_EnableGenericModel.IsChecked))
 
             fields = [
                 ("rect", self.cb_SymbolRect, self.tb_OffsetRect, self.cb_RotationRect),
                 ("rduct", self.cb_SymbolRoundDuct, self.tb_OffsetRoundDuct, self.cb_RotationRoundDuct),
-                ("pipe", self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe)
+                ("pipe", self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe),
+                ("at_rect", self.cb_SymbolAirTerminalRect, self.tb_OffsetAirTerminal, self.cb_RotationAirTerminalRect),
+                ("at_round", self.cb_SymbolAirTerminalRound, self.tb_OffsetAirTerminalRound, self.cb_RotationAirTerminalRound),
+                ("gm", self.cb_SymbolGenericModel, self.tb_OffsetGenericModel, self.cb_RotationGenericModel),
             ]
 
             for key, cb_sym, tb_off, cb_rot in fields:
                 cfg.set_option("last_sym_" + key, cb_sym.Text)
-                cfg.set_option("last_off_" + key, tb_off.Text)
-                cfg.set_option("last_rot_" + key, cb_rot.Text)
+                cfg.set_option("last_overall_off_" + key, tb_off.Text)
+                rot_val = cb_rot.SelectedItem.Content.ToString() if cb_rot.SelectedItem else cb_rot.Text
+                cfg.set_option("last_rot_" + key, rot_val)
 
             script.save_config()
         except Exception:
             pass
-
-    def set_rotation_combo(self, cb_rot, rot_text):
-        for item in cb_rot.Items:
-            if rot_text and rot_text.split("°")[0] in item.Content.ToString():
-                cb_rot.SelectedItem = item
-                break
 
     def filter_combobox(self, cb_element, query, set_drop_open=True):
         current_text = cb_element.Text
@@ -258,7 +352,7 @@ class PenetrationUI(forms.WPFWindow):
         if set_drop_open:
             cb_element.IsDropDownOpen = True
         cb_element.Text = current_text
-        
+
         tb = cb_element.Template.FindName("PART_EditableTextBox", cb_element)
         if tb:
             tb.CaretIndex = len(current_text)
@@ -267,23 +361,23 @@ class PenetrationUI(forms.WPFWindow):
         if args.Key.ToString() not in ["Up", "Down", "Enter", "Escape", "Tab"]:
             self.filter_combobox(sender, sender.Text)
 
-    def OnRectComboKeyUp(self, sender, args): self.OnComboKeyUp(sender, args)
-    def OnRoundDuctComboKeyUp(self, sender, args): self.OnComboKeyUp(sender, args)
-    def OnPipeComboKeyUp(self, sender, args): self.OnComboKeyUp(sender, args)
-
     def parse_profile_config(self, cb_sym, tb_off, cb_rot, label):
         sym_text = cb_sym.Text
         if not sym_text or sym_text not in self.symbol_map:
-            forms.alert("Please select a valid Family Symbol for " + label)
+            self.exp_AdvancedSettings.IsExpanded = True
+            forms.alert("Please select a valid Penetration Family Type for " + label + " in 3. Settings.")
             return None
 
         try:
             offset_feet = mm_to_feet(float(tb_off.Text))
         except ValueError:
-            forms.alert("Invalid offset value for " + label)
+            self.exp_AdvancedSettings.IsExpanded = True
+            forms.alert("Invalid Overall Offset Value for " + label)
             return None
 
-        rot_deg = 90.0 if "90" in cb_rot.Text else 0.0
+        rot_text = cb_rot.SelectedItem.Content.ToString() if cb_rot.SelectedItem else (cb_rot.Text or "")
+        rot_deg = 90.0 if "90" in rot_text else 0.0
+
         return {
             "symbol": self.symbol_map[sym_text],
             "offset_feet": offset_feet,
@@ -293,30 +387,44 @@ class PenetrationUI(forms.WPFWindow):
     def parse_inputs(self):
         selected_model = self.cb_LinkModel.SelectedItem
         if not selected_model or selected_model not in self.model_map:
-            forms.alert("Please select a valid model.")
+            forms.alert("Please select a valid host model.")
             return False
 
         self.target_doc, self.target_link_inst = self.model_map[selected_model]
-        
-        cat_dict = {
-            "Walls": DB.BuiltInCategory.OST_Walls,
-            "Floors": DB.BuiltInCategory.OST_Floors,
-            "Roofs": DB.BuiltInCategory.OST_Roofs,
-            "Ceilings": DB.BuiltInCategory.OST_Ceilings
-        }
-        self.selected_category_bic = cat_dict.get(LOCKED_HOST_CATEGORY_NAME, DB.BuiltInCategory.OST_Walls)
+        self.selected_category_bic = DB.BuiltInCategory.OST_Ceilings
         self.type_filter_keyword = self.tb_TypeFilterKeyword.Text.strip().lower()
 
-        rect_cfg = self.parse_profile_config(self.cb_SymbolRect, self.tb_OffsetRect, self.cb_RotationRect, "Rectangular Ducts")
-        rduct_cfg = self.parse_profile_config(self.cb_SymbolRoundDuct, self.tb_OffsetRoundDuct, self.cb_RotationRoundDuct, "Round Ducts")
-        pipe_cfg = self.parse_profile_config(self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe, "Pipes")
+        self.enable_mep = bool(self.chk_EnableMep.IsChecked)
+        self.enable_air_terminal = bool(self.chk_EnableAirTerminal.IsChecked)
+        self.enable_generic_model = bool(self.chk_EnableGenericModel.IsChecked)
 
-        if not (rect_cfg and rduct_cfg and pipe_cfg):
+        if not (self.enable_mep or self.enable_air_terminal or self.enable_generic_model):
+            forms.alert("Please tick at least one element type in Section 2.")
             return False
 
-        self.config["RECT"] = rect_cfg
-        self.config["ROUND_DUCT"] = rduct_cfg
-        self.config["PIPE"] = pipe_cfg
+        if self.enable_mep:
+            rect_cfg = self.parse_profile_config(self.cb_SymbolRect, self.tb_OffsetRect, self.cb_RotationRect, "Rect Ducts & DA")
+            rduct_cfg = self.parse_profile_config(self.cb_SymbolRoundDuct, self.tb_OffsetRoundDuct, self.cb_RotationRoundDuct, "Round Ducts & DA")
+            pipe_cfg = self.parse_profile_config(self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe, "Round Pipes")
+            if not (rect_cfg and rduct_cfg and pipe_cfg):
+                return False
+            self.config["RECT"] = rect_cfg
+            self.config["ROUND_DUCT"] = rduct_cfg
+            self.config["PIPE"] = pipe_cfg
+
+        if self.enable_air_terminal:
+            at_rect_cfg = self.parse_profile_config(self.cb_SymbolAirTerminalRect, self.tb_OffsetAirTerminal, self.cb_RotationAirTerminalRect, "Air Terminal (Rect)")
+            at_round_cfg = self.parse_profile_config(self.cb_SymbolAirTerminalRound, self.tb_OffsetAirTerminalRound, self.cb_RotationAirTerminalRound, "Air Terminal (Swirl)")
+            if not (at_rect_cfg and at_round_cfg):
+                return False
+            self.config["AIR_TERMINAL_RECT"] = at_rect_cfg
+            self.config["AIR_TERMINAL_ROUND"] = at_round_cfg
+
+        if self.enable_generic_model:
+            gm_cfg = self.parse_profile_config(self.cb_SymbolGenericModel, self.tb_OffsetGenericModel, self.cb_RotationGenericModel, "Generic Models")
+            if not gm_cfg:
+                return False
+            self.config["GENERIC_MODEL"] = gm_cfg
 
         self.save_user_defaults()
         return True
@@ -345,11 +453,74 @@ def get_element_type_name(elem):
     except Exception:
         return ""
 
+
+def get_element_family_and_type_name(elem):
+    try:
+        elem_type = elem.Document.GetElement(elem.GetTypeId())
+        if not elem_type:
+            return ""
+        fam_name = elem_type.FamilyName if hasattr(elem_type, "FamilyName") else ""
+        type_name = DB.Element.Name.__get__(elem_type)
+        return "{} {}".format(fam_name, type_name).lower()
+    except Exception:
+        return ""
+
+
+def get_param_double_instance_or_type(elem, param_name):
+    try:
+        p = elem.LookupParameter(param_name)
+        if p and p.HasValue:
+            val = p.AsDouble()
+            if val > 0:
+                return val
+        elem_type = elem.Document.GetElement(elem.GetTypeId())
+        if elem_type:
+            p_type = elem_type.LookupParameter(param_name)
+            if p_type and p_type.HasValue:
+                val = p_type.AsDouble()
+                if val > 0:
+                    return val
+    except Exception:
+        pass
+    return 0.0
+
+
+def get_insulation_thickness_2x(mep_elem):
+    try:
+        p_insul = mep_elem.get_Parameter(DB.BuiltInParameter.RBS_REFERENCE_INSULATION_THICKNESS) or \
+                  mep_elem.LookupParameter("Insulation Thickness")
+        if p_insul and p_insul.HasValue:
+            val = p_insul.AsDouble()
+            if val > 0:
+                return val * 2.0
+    except Exception:
+        pass
+    return 0.0
+
+
+def is_refrigerant_pipe(mep_elem):
+    try:
+        p_sys = mep_elem.get_Parameter(DB.BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM) or \
+                mep_elem.LookupParameter("System Type")
+        if p_sys:
+            sys_str = p_sys.AsValueString() or p_sys.AsString() or ""
+            if "refrigerant" in sys_str.lower():
+                return True
+        p_name = mep_elem.get_Parameter(DB.BuiltInParameter.RBS_SYSTEM_NAME_PARAM)
+        if p_name:
+            name_str = p_name.AsString() or ""
+            if "refrigerant" in name_str.lower():
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def get_element_solid(elem, transform=None):
     opt = DB.Options()
     opt.ComputeReferences = True
     opt.DetailLevel = DB.ViewDetailLevel.Fine
-    
+
     geom_elem = elem.get_Geometry(opt)
     if not geom_elem:
         return None
@@ -380,35 +551,162 @@ def get_element_solid(elem, transform=None):
 
     return unified_solid
 
-def get_element_thickness(element):
-    elem_type = element.Document.GetElement(element.GetTypeId())
-    if not elem_type:
-        return 0.0
 
-    if hasattr(elem_type, "Width"):
-        return elem_type.Width
+def get_solid_z_bounds(solid):
+    """ Returns exact world (min_z, max_z) from solid vertices """
+    min_z = None
+    max_z = None
+    try:
+        for edge in solid.Edges:
+            for pt in edge.Tessellate():
+                if min_z is None or pt.Z < min_z:
+                    min_z = pt.Z
+                if max_z is None or pt.Z > max_z:
+                    max_z = pt.Z
+    except Exception:
+        pass
 
-    if hasattr(elem_type, "GetCompoundStructure"):
-        cs = elem_type.GetCompoundStructure()
-        if cs:
-            return cs.GetWidth()
+    if min_z is not None and max_z is not None:
+        return min_z, max_z
 
-    p_thick = elem_type.LookupParameter("Thickness") or element.LookupParameter("Thickness")
-    return p_thick.AsDouble() if p_thick else 0.0
+    try:
+        bb = solid.GetBoundingBox()
+        if bb:
+            p1 = bb.Transform.OfPoint(bb.Min)
+            p2 = bb.Transform.OfPoint(bb.Max)
+            return min(p1.Z, p2.Z), max(p1.Z, p2.Z)
+    except Exception:
+        pass
+    return None, None
+
+
+def get_ceiling_thickness(ceiling_elem, ceiling_solid=None):
+    """ Reads exact Ceiling Thickness for BarrierThickness """
+    try:
+        elem_type = ceiling_elem.Document.GetElement(ceiling_elem.GetTypeId())
+        if elem_type:
+            # 1. Built-in Ceiling Thickness parameter
+            p_ct = elem_type.get_Parameter(DB.BuiltInParameter.CEILING_THICKNESS)
+            if p_ct and p_ct.HasValue and p_ct.AsDouble() > 0:
+                return p_ct.AsDouble()
+
+            # 2. CompoundStructure total width
+            if hasattr(elem_type, "GetCompoundStructure"):
+                cs = elem_type.GetCompoundStructure()
+                if cs and cs.GetWidth() > 0:
+                    return cs.GetWidth()
+
+            # 3. Type or Instance 'Thickness' parameter
+            p_thick = elem_type.LookupParameter("Thickness") or ceiling_elem.LookupParameter("Thickness")
+            if p_thick and p_thick.HasValue and p_thick.AsDouble() > 0:
+                return p_thick.AsDouble()
+
+            if hasattr(elem_type, "Width") and elem_type.Width > 0:
+                return elem_type.Width
+    except Exception:
+        pass
+
+    # 4. Fallback to actual solid vertical thickness
+    if ceiling_solid:
+        min_z, max_z = get_solid_z_bounds(ceiling_solid)
+        if min_z is not None and max_z is not None and (max_z - min_z) > 0:
+            return max_z - min_z
+
+    return 0.0
+
 
 def get_mep_profile_type(mep_elem):
     cat_id = mep_elem.Category.Id.IntegerValue
-    pipe_cats = [int(c) for c in [DB.BuiltInCategory.OST_PipeCurves, DB.BuiltInCategory.OST_PipeAccessory, DB.BuiltInCategory.OST_PipeFitting]]
+    if cat_id == int(DB.BuiltInCategory.OST_DuctTerminal):
+        return "AIR_TERMINAL"
+    if cat_id == int(DB.BuiltInCategory.OST_GenericModel):
+        return "GENERIC_MODEL"
+
+    pipe_cats = [int(c) for c in [
+        DB.BuiltInCategory.OST_PipeCurves,
+        DB.BuiltInCategory.OST_PipeAccessory,
+        DB.BuiltInCategory.OST_PipeFitting
+    ]]
     if cat_id in pipe_cats:
         return "PIPE"
 
-    p_dia = mep_elem.LookupParameter("Diameter") or mep_elem.get_Parameter(DB.BuiltInParameter.RBS_PIPE_DIAMETER_PARAM) or mep_elem.get_Parameter(DB.BuiltInParameter.RBS_CURVE_DIAMETER_PARAM)
+    p_dia = mep_elem.LookupParameter("Diameter") or \
+            mep_elem.get_Parameter(DB.BuiltInParameter.RBS_PIPE_DIAMETER_PARAM) or \
+            mep_elem.get_Parameter(DB.BuiltInParameter.RBS_CURVE_DIAMETER_PARAM)
     return "ROUND_DUCT" if p_dia else "RECT"
+
+
+def get_air_terminal_dimensions(elem):
+    neck1 = get_param_double_instance_or_type(elem, "Neck1")
+    neck2 = get_param_double_instance_or_type(elem, "Neck2")
+    full_name = get_element_family_and_type_name(elem)
+
+    is_round_keyword = any(kw in full_name for kw in ["round", "swirl", "circular", "dia"])
+
+    if neck1 > 0 and (neck2 <= 0 or is_round_keyword):
+        return neck1, neck1, neck1, True
+
+    if neck1 > 0 and neck2 > 0:
+        return neck1, neck2, 0.0, False
+
+    try:
+        conn_mgr = None
+        if hasattr(elem, "MEPModel") and elem.MEPModel and elem.MEPModel.ConnectorManager:
+            conn_mgr = elem.MEPModel.ConnectorManager
+        if conn_mgr:
+            for conn in conn_mgr.Connectors:
+                if conn.Shape == DB.ConnectorProfileType.Round:
+                    dia = conn.Radius * 2.0
+                    return dia, dia, dia, True
+                elif conn.Shape == DB.ConnectorProfileType.Rectangular:
+                    return conn.Width, conn.Height, 0.0, False
+    except Exception:
+        pass
+
+    bb = elem.get_BoundingBox(None)
+    if bb:
+        w, h = abs(bb.Max.X - bb.Min.X), abs(bb.Max.Y - bb.Min.Y)
+        if is_round_keyword:
+            dia = max(w, h)
+            return dia, dia, dia, True
+        return w, h, 0.0, False
+
+    return 0.0, 0.0, 0.0, False
+
+
+def get_generic_model_dimensions(elem):
+    w = get_param_double_instance_or_type(elem, "Width")
+    h = get_param_double_instance_or_type(elem, "Height")
+    if w > 0 and h > 0:
+        return w, h, 0.0
+
+    try:
+        opt = DB.Options()
+        geom = elem.get_Geometry(opt)
+        if geom:
+            for g in geom:
+                if isinstance(g, DB.GeometryInstance):
+                    sym_bb = g.GetSymbolGeometry().GetBoundingBox()
+                    if sym_bb:
+                        sx = abs(sym_bb.Max.X - sym_bb.Min.X)
+                        sy = abs(sym_bb.Max.Y - sym_bb.Min.Y)
+                        return sx, sy, 0.0
+    except Exception:
+        pass
+
+    bb = elem.get_BoundingBox(None)
+    if bb:
+        return abs(bb.Max.X - bb.Min.X), abs(bb.Max.Y - bb.Min.Y), 0.0
+
+    return 0.0, 0.0, 0.0
+
 
 def get_mep_dimensions(mep_elem):
     p_w = mep_elem.LookupParameter("Width") or mep_elem.get_Parameter(DB.BuiltInParameter.RBS_CURVE_WIDTH_PARAM)
     p_h = mep_elem.LookupParameter("Height") or mep_elem.get_Parameter(DB.BuiltInParameter.RBS_CURVE_HEIGHT_PARAM)
-    p_dia = mep_elem.LookupParameter("Diameter") or mep_elem.get_Parameter(DB.BuiltInParameter.RBS_PIPE_DIAMETER_PARAM) or mep_elem.get_Parameter(DB.BuiltInParameter.RBS_CURVE_DIAMETER_PARAM)
+    p_dia = mep_elem.LookupParameter("Diameter") or \
+            mep_elem.get_Parameter(DB.BuiltInParameter.RBS_PIPE_DIAMETER_PARAM) or \
+            mep_elem.get_Parameter(DB.BuiltInParameter.RBS_CURVE_DIAMETER_PARAM)
 
     if p_dia:
         dia = p_dia.AsDouble()
@@ -424,11 +722,82 @@ def get_mep_dimensions(mep_elem):
 
     return 0.0, 0.0, 0.0
 
+
+def get_element_orientation_angle(elem):
+    """
+    Returns exact XY orientation angle (radians) using HandOrientation (X-axis)
+    to stay 100% consistent with get_instance_hand_angle(inst).
+    Also handles vertical rectangular ducts via Connector CoordinateSystem.BasisX.
+    """
+    try:
+        if isinstance(elem, DB.FamilyInstance):
+            hand = elem.HandOrientation
+            if hand and (abs(hand.X) > 1e-5 or abs(hand.Y) > 1e-5):
+                return math.atan2(hand.Y, hand.X)
+            if isinstance(elem.Location, DB.LocationPoint):
+                return elem.Location.Rotation
+
+        # For vertical ducts/pipes penetrating a ceiling, read cross-section BasisX from connector
+        if hasattr(elem, "ConnectorManager") and elem.ConnectorManager:
+            for conn in elem.ConnectorManager.Connectors:
+                cs = conn.CoordinateSystem
+                if cs and cs.BasisX:
+                    bx = cs.BasisX
+                    if abs(bx.X) > 1e-5 or abs(bx.Y) > 1e-5:
+                        return math.atan2(bx.Y, bx.X)
+
+        if hasattr(elem, "Location") and elem.Location:
+            if isinstance(elem.Location, DB.LocationCurve) and elem.Location.Curve:
+                p0 = elem.Location.Curve.GetEndPoint(0)
+                p1 = elem.Location.Curve.GetEndPoint(1)
+                dx, dy = p1.X - p0.X, p1.Y - p0.Y
+                if abs(dx) > 1e-5 or abs(dy) > 1e-5:
+                    return math.atan2(dy, dx)
+            elif isinstance(elem.Location, DB.LocationPoint):
+                return elem.Location.Rotation
+    except Exception:
+        pass
+    return 0.0
+
+
+def get_instance_hand_angle(inst):
+    """ Reads penetration's own HandOrientation (X-axis) so 0 deg matches unrotated element """
+    try:
+        hand = inst.HandOrientation
+        if hand and (abs(hand.X) > 1e-5 or abs(hand.Y) > 1e-5):
+            return math.atan2(hand.Y, hand.X)
+        if isinstance(inst.Location, DB.LocationPoint):
+            return inst.Location.Rotation
+    except Exception:
+        pass
+    return 0.0
+
+
+def set_aligned_instance_rotation(inst, placement_pt, target_rotation_rad):
+    """ Rotates penetration using matching HandOrientation axis (fixes -90 deg reversal) """
+    try:
+        current_angle = get_instance_hand_angle(inst)
+        delta_angle = target_rotation_rad - current_angle
+        delta_angle = (delta_angle + math.pi) % (2 * math.pi) - math.pi
+
+        if abs(delta_angle) > 0.01:
+            axis = DB.Line.CreateBound(
+                placement_pt,
+                DB.XYZ(placement_pt.X, placement_pt.Y, placement_pt.Z + 1.0)
+            )
+            DB.ElementTransformUtils.RotateElement(doc, inst.Id, axis, delta_angle)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def get_closest_level(placement_z):
     levels = DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements()
     if not levels:
         return None
     return min(levels, key=lambda lvl: abs(lvl.Elevation - placement_z))
+
 
 def get_mep_reference_level(elem, placement_z=None):
     if placement_z is not None:
@@ -453,19 +822,73 @@ def get_mep_reference_level(elem, placement_z=None):
     levels = DB.FilteredElementCollector(doc).OfClass(DB.Level).ToElements()
     return levels[0] if levels else None
 
-def set_elevation_from_level(inst, target_level, absolute_z):
-    offset_val = absolute_z - target_level.Elevation
-    p_elev = inst.get_Parameter(DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM) or \
-             inst.get_Parameter(DB.BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM) or \
-             inst.LookupParameter("Elevation from Level") or \
-             inst.LookupParameter("Offset")
 
-    if p_elev and not p_elev.IsReadOnly:
-        p_elev.Set(offset_val)
+def get_elevation_param(inst):
+    for bip in [DB.BuiltInParameter.INSTANCE_ELEVATION_PARAM, DB.BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM]:
+        p = inst.get_Parameter(bip)
+        if p and not p.IsReadOnly:
+            return p
+    for name in ["Elevation from Level", "Offset", "Elevation"]:
+        p = inst.LookupParameter(name)
+        if p and not p.IsReadOnly:
+            return p
+    return None
+
+
+def set_elevation_from_level(inst, target_level, absolute_z):
+    target_offset = absolute_z - target_level.Elevation
+    p_elev = get_elevation_param(inst)
+    if p_elev:
+        p_elev.Set(target_offset)
+        return
+
+    if isinstance(inst.Location, DB.LocationPoint):
+        cur_z = inst.Location.Point.Z
+        dz = absolute_z - cur_z
+        if abs(dz) > 0.001:
+            DB.ElementTransformUtils.MoveElement(doc, inst.Id, DB.XYZ(0, 0, dz))
+
+
+def align_penetration_z_inside_ceiling(inst, ceiling_min_z, ceiling_max_z):
+    """
+    Guarantees the penetration sits 100% flush inside the ceiling [ceiling_min_z, ceiling_max_z],
+    regardless of whether the family origin is at Top, Center, or Bottom.
+    """
+    if ceiling_min_z is None or ceiling_max_z is None:
+        return False
+
+    try:
+        doc.Regenerate()
+        bb = inst.get_BoundingBox(None)
+        if not bb:
+            return False
+
+        cur_mid_z = (bb.Min.Z + bb.Max.Z) / 2.0
+        ceiling_mid_z = (ceiling_min_z + ceiling_max_z) / 2.0
+        dz = ceiling_mid_z - cur_mid_z
+
+        if abs(dz) > 0.001:
+            p_elev = get_elevation_param(inst)
+            if p_elev:
+                p_elev.Set(p_elev.AsDouble() + dz)
+            else:
+                DB.ElementTransformUtils.MoveElement(doc, inst.Id, DB.XYZ(0, 0, dz))
+            return True
+    except Exception:
+        pass
+    return False
+
 
 def apply_penetration_parameters(inst, target_barrier, target_w, target_h, target_dia):
+    # Apply BarrierThickness (supports both 'BarrierThickness' and 'Barrier Thickness')
+    if target_barrier > 0:
+        for b_name in ["BarrierThickness", "Barrier Thickness"]:
+            p_b = inst.LookupParameter(b_name)
+            if p_b and not p_b.IsReadOnly:
+                p_b.Set(target_barrier)
+                break
+
     params = {
-        "BarrierThickness": target_barrier,
         "Diameter": target_dia,
         "Width": target_w,
         "Height": target_h
@@ -476,35 +899,6 @@ def apply_penetration_parameters(inst, target_barrier, target_w, target_h, targe
             if p and not p.IsReadOnly:
                 p.Set(value)
 
-def get_instance_facing_angle(inst):
-    """ Flattens facing vector to XY plane to get angle relative to World East """
-    try:
-        facing = inst.FacingOrientation
-        if facing:
-            return math.atan2(facing.Y, facing.X)
-    except Exception:
-        pass
-    return 0.0
-
-def set_absolute_instance_rotation(inst, placement_pt, target_rotation_rad):
-    """ Enforces rotation relative to World coordinates regardless of active view """
-    try:
-        current_angle = get_instance_facing_angle(inst)
-        delta_angle = target_rotation_rad - current_angle
-
-        # Normalize delta angle to range [-pi, pi]
-        delta_angle = (delta_angle + math.pi) % (2 * math.pi) - math.pi
-
-        if abs(delta_angle) > 0.01:
-            axis = DB.Line.CreateBound(
-                placement_pt,
-                DB.XYZ(placement_pt.X, placement_pt.Y, placement_pt.Z + 1.0)
-            )
-            DB.ElementTransformUtils.RotateElement(doc, inst.Id, axis, delta_angle)
-            return True
-    except Exception:
-        pass
-    return False
 
 def find_existing_penetration(pt, radius=1.0):
     outline = DB.Outline(
@@ -518,9 +912,14 @@ def find_existing_penetration(pt, radius=1.0):
                            .ToElements()
 
     for inst in existing_instances:
-        if isinstance(inst.Location, DB.LocationPoint) and inst.Location.Point.DistanceTo(pt) <= radius:
-            return inst
+        if isinstance(inst.Location, DB.LocationPoint):
+            dist_xy = math.hypot(inst.Location.Point.X - pt.X, inst.Location.Point.Y - pt.Y)
+            dist_z = abs(inst.Location.Point.Z - pt.Z)
+            if dist_xy <= radius and dist_z <= max(radius, 1.5):
+                if inst.LookupParameter("BarrierThickness") is not None or inst.LookupParameter("Barrier Thickness") is not None:
+                    return inst
     return None
+
 
 def get_view_crop_outline(view):
     try:
@@ -543,7 +942,7 @@ def get_view_crop_outline(view):
 
 
 # --- MAIN EXECUTION ---
-xaml_path = os.path.join(os.path.dirname(__file__), "ui.xaml")
+xaml_path = os.path.join(os.path.dirname(__file__), "UI.xaml")
 win = PenetrationUI(xaml_path)
 win.show_dialog()
 
@@ -558,35 +957,73 @@ config = win.config
 
 link_transform = link_inst.GetTotalTransform() if link_inst else DB.Transform.Identity
 
+active_categories = []
+if win.enable_mep:
+    active_categories.extend(BASE_MEP_CATEGORIES)
+if win.enable_air_terminal:
+    active_categories.append(DB.BuiltInCategory.OST_DuctTerminal)
+if win.enable_generic_model:
+    active_categories.append(DB.BuiltInCategory.OST_GenericModel)
+
+peno_symbol_ids = set()
+for k in config:
+    sym = config[k].get("symbol")
+    if sym:
+        peno_symbol_ids.add(sym.Id)
+
 mep_elements = []
 
 if win.mode == "PICK_ELEMENTS":
     try:
         refs = uidoc.Selection.PickObjects(
-            Selection.ObjectType.Element, 
-            MEPSelectionFilter(), 
-            "Select Ducts/Pipes/Accessories. Click FINISH in top-left options bar."
+            Selection.ObjectType.Element,
+            MEPSelectionFilter(active_categories, peno_symbol_ids),
+            "Select target elements. Click FINISH in top-left options bar."
         )
         mep_elements = [doc.GetElement(r.ElementId) for r in refs]
     except Exception:
         sys.exit()
 
 elif win.mode == "ENTIRE_VIEW":
-    cat_filters = [DB.ElementCategoryFilter(c) for c in MEP_CATEGORIES]
-    multi_cat_filter = DB.LogicalOrFilter(cat_filters)
+    cat_filters = [DB.ElementCategoryFilter(c) for c in active_categories]
+    multi_cat_filter = DB.LogicalOrFilter(cat_filters) if len(cat_filters) > 1 else cat_filters[0]
 
-    mep_elements = list(
+    raw_elements = list(
         DB.FilteredElementCollector(doc, doc.ActiveView.Id)
           .WherePasses(multi_cat_filter)
           .WhereElementIsNotElementType()
           .ToElements()
     )
 
+    mep_elements = [
+        el for el in raw_elements
+        if not is_union_fitting(el) and not is_penetration_instance(el, peno_symbol_ids)
+    ]
+
+    if not mep_elements:
+        forms.alert("No matching elements found in the Active View.", title="Warning", warn_icon=True)
+        sys.exit()
+
+    confirm_msg = (
+        u"WARNING: You are about to generate/update penetrations for {} element(s) in Active View:\n"
+        u"\u2022 Tool: Ceiling Penetration\n"
+        u"\u2022 View Name: {}\n\n"
+        u"Do you want to proceed?"
+    ).format(len(mep_elements), doc.ActiveView.Name)
+
+    user_choice = forms.alert(
+        confirm_msg,
+        title="Confirm Entire Active View",
+        options=["Yes", "No"],
+        warn_icon=True
+    )
+    if user_choice != "Yes":
+        sys.exit()
+
 if not mep_elements:
-    forms.alert("No matching MEP elements found in the current view.")
+    forms.alert("No matching elements found.")
     sys.exit()
 
-# Filter Host Elements
 all_hosts = DB.FilteredElementCollector(target_host_doc)\
               .OfCategory(category_bic)\
               .WhereElementIsNotElementType()\
@@ -595,8 +1032,17 @@ all_hosts = DB.FilteredElementCollector(target_host_doc)\
 host_elements = [h for h in all_hosts if not type_kw or type_kw in get_element_type_name(h)]
 
 if not host_elements:
-    forms.alert("No host elements matching category and filter were found.")
+    forms.alert("No ceiling elements matching filter were found.")
     sys.exit()
+
+# Pre-cache ceiling solids, Z bounds, and thicknesses for speed & consistency
+host_cache = []
+for h in host_elements:
+    h_solid = get_element_solid(h, link_transform)
+    if h_solid:
+        c_min_z, c_max_z = get_solid_z_bounds(h_solid)
+        c_thick = get_ceiling_thickness(h, h_solid)
+        host_cache.append((h, h_solid, c_min_z, c_max_z, c_thick))
 
 view_outline = get_view_crop_outline(doc.ActiveView)
 
@@ -604,33 +1050,104 @@ placed_count = 0
 updated_count = 0
 skipped_count = 0
 
-t = DB.Transaction(doc, "Generate/Update Penetrations")
+t = DB.Transaction(doc, "Generate/Update Ceiling Penetrations")
 t.Start()
 
 for profile_key in config:
-    sym = config[profile_key]["symbol"]
+    sym = config[profile_key].get("symbol")
     if sym and not sym.IsActive:
         sym.Activate()
 
 for mep_elem in mep_elements:
-    # Double check skip Union fittings during execution
-    if is_union_fitting(mep_elem):
+    if is_union_fitting(mep_elem) or is_penetration_instance(mep_elem, peno_symbol_ids):
+        continue
+
+    profile_type = get_mep_profile_type(mep_elem)
+    if profile_type == "AIR_TERMINAL" and not win.enable_air_terminal:
+        continue
+    if profile_type == "GENERIC_MODEL" and not win.enable_generic_model:
+        continue
+    if profile_type in ["RECT", "ROUND_DUCT", "PIPE"] and not win.enable_mep:
         continue
 
     mep_solid = get_element_solid(mep_elem)
     if not mep_solid:
         continue
 
-    prof_cfg = config[get_mep_profile_type(mep_elem)]
-    symbol = prof_cfg["symbol"]
-    offset_feet = prof_cfg["offset_feet"]
-    rotation_rad = prof_cfg["rotation_rad"]
+    target_w, target_h, target_dia = 0.0, 0.0, 0.0
+    ui_rotation_rad = 0.0
 
-    for host_elem in host_elements:
-        host_solid = get_element_solid(host_elem, link_transform)
-        if not host_solid:
-            continue
+    if profile_type == "AIR_TERMINAL":
+        at_w, at_h, at_dia, is_round_at = get_air_terminal_dimensions(mep_elem)
+        if is_round_at:
+            prof_cfg = config["AIR_TERMINAL_ROUND"]
+            symbol = prof_cfg["symbol"]
+            offset_feet = prof_cfg["offset_feet"]
+            ui_rotation_rad = prof_cfg["rotation_rad"]
+            target_dia = at_dia + offset_feet if at_dia > 0 else 0.0
+            target_w = target_dia
+            target_h = target_dia
+        else:
+            prof_cfg = config["AIR_TERMINAL_RECT"]
+            symbol = prof_cfg["symbol"]
+            offset_feet = prof_cfg["offset_feet"]
+            ui_rotation_rad = prof_cfg["rotation_rad"]
+            target_w = at_w + offset_feet if at_w > 0 else 0.0
+            target_h = at_h + offset_feet if at_h > 0 else 0.0
+            target_dia = 0.0
 
+    elif profile_type == "GENERIC_MODEL":
+        prof_cfg = config["GENERIC_MODEL"]
+        symbol = prof_cfg["symbol"]
+        offset_feet = prof_cfg["offset_feet"]
+        ui_rotation_rad = prof_cfg["rotation_rad"]
+        gm_w, gm_h, _ = get_generic_model_dimensions(mep_elem)
+        target_w = gm_w + offset_feet if gm_w > 0 else 0.0
+        target_h = gm_h + offset_feet if gm_h > 0 else 0.0
+        target_dia = 0.0
+
+    elif profile_type == "PIPE":
+        prof_cfg = config["PIPE"]
+        symbol = prof_cfg["symbol"]
+        offset_feet = prof_cfg["offset_feet"]
+        ui_rotation_rad = prof_cfg["rotation_rad"]
+        if is_refrigerant_pipe(mep_elem):
+            target_dia = mm_to_feet(150.0)
+            target_w = target_dia
+            target_h = target_dia
+        else:
+            _, _, mep_dia = get_mep_dimensions(mep_elem)
+            insul_2x = get_insulation_thickness_2x(mep_elem)
+            target_dia = mep_dia + insul_2x + offset_feet if mep_dia > 0 else 0.0
+            target_w = target_dia
+            target_h = target_dia
+
+    elif profile_type == "ROUND_DUCT":
+        prof_cfg = config["ROUND_DUCT"]
+        symbol = prof_cfg["symbol"]
+        offset_feet = prof_cfg["offset_feet"]
+        ui_rotation_rad = prof_cfg["rotation_rad"]
+        _, _, mep_dia = get_mep_dimensions(mep_elem)
+        insul_2x = get_insulation_thickness_2x(mep_elem)
+        target_dia = mep_dia + insul_2x + offset_feet if mep_dia > 0 else 0.0
+        target_w = target_dia
+        target_h = target_dia
+
+    else:  # RECT
+        prof_cfg = config["RECT"]
+        symbol = prof_cfg["symbol"]
+        offset_feet = prof_cfg["offset_feet"]
+        ui_rotation_rad = prof_cfg["rotation_rad"]
+        mep_w, mep_h, _ = get_mep_dimensions(mep_elem)
+        insul_2x = get_insulation_thickness_2x(mep_elem)
+        target_w = mep_w + insul_2x + offset_feet if mep_w > 0 else 0.0
+        target_h = mep_h + insul_2x + offset_feet if mep_h > 0 else 0.0
+        target_dia = 0.0
+
+    elem_angle_rad = get_element_orientation_angle(mep_elem)
+    target_rotation_rad = elem_angle_rad + ui_rotation_rad
+
+    for host_elem, host_solid, ceiling_min_z, ceiling_max_z, target_barrier in host_cache:
         placement_pt = None
         try:
             intersection_solid = DB.BooleanOperationsUtils.ExecuteBooleanOperation(
@@ -645,21 +1162,16 @@ for mep_elem in mep_elements:
             if view_outline and not view_outline.Contains(placement_pt, 0.01):
                 continue
 
-            target_level = get_mep_reference_level(mep_elem, placement_pt.Z)
+            # Initial Z at top of ceiling (then auto-verified against ceiling [min_z, max_z])
+            initial_z = ceiling_max_z if ceiling_max_z is not None else placement_pt.Z
+            target_level = get_mep_reference_level(mep_elem, initial_z)
             if not target_level:
                 continue
-
-            target_barrier = get_element_thickness(host_elem)
-            mep_w, mep_h, mep_dia = get_mep_dimensions(mep_elem)
-            
-            target_w = mep_w + (offset_feet * 2) if mep_w > 0 else 0.0
-            target_h = mep_h + (offset_feet * 2) if mep_h > 0 else 0.0
-            target_dia = mep_dia + (offset_feet * 2) if mep_dia > 0 else 0.0
 
             existing_inst = find_existing_penetration(placement_pt, radius=1.0)
 
             if existing_inst:
-                p_barrier = existing_inst.LookupParameter("BarrierThickness")
+                p_barrier = existing_inst.LookupParameter("BarrierThickness") or existing_inst.LookupParameter("Barrier Thickness")
                 p_dia = existing_inst.LookupParameter("Diameter")
                 p_w = existing_inst.LookupParameter("Width")
                 p_h = existing_inst.LookupParameter("Height")
@@ -679,44 +1191,41 @@ for mep_elem in mep_elements:
                 width_changed = abs(cur_w - target_w) > 0.001 if target_w > 0 else False
                 height_changed = abs(cur_h - target_h) > 0.001 if target_h > 0 else False
 
-                # Align rotation strictly to World XYZ bounds
-                rotation_changed = set_absolute_instance_rotation(existing_inst, placement_pt, rotation_rad)
+                rotation_changed = set_aligned_instance_rotation(existing_inst, placement_pt, target_rotation_rad)
 
-                if type_changed or level_changed or barrier_changed or dia_changed or width_changed or height_changed or rotation_changed:
-                    if type_changed:
-                        existing_inst.Symbol = symbol
+                if type_changed:
+                    existing_inst.Symbol = symbol
+                if p_lvl and not p_lvl.IsReadOnly and level_changed:
+                    p_lvl.Set(target_level.Id)
 
-                    if p_lvl and not p_lvl.IsReadOnly and level_changed:
-                        p_lvl.Set(target_level.Id)
+                apply_penetration_parameters(existing_inst, target_barrier, target_w, target_h, target_dia)
+                z_aligned = align_penetration_z_inside_ceiling(existing_inst, ceiling_min_z, ceiling_max_z)
 
-                    set_elevation_from_level(existing_inst, target_level, placement_pt.Z)
-                    apply_penetration_parameters(existing_inst, target_barrier, target_w, target_h, target_dia)
-
+                if type_changed or level_changed or barrier_changed or dia_changed or width_changed or height_changed or rotation_changed or z_aligned:
                     updated_count += 1
                 else:
                     skipped_count += 1
 
             else:
+                place_xyz = DB.XYZ(placement_pt.X, placement_pt.Y, initial_z)
                 inst = doc.Create.NewFamilyInstance(
-                    placement_pt, 
-                    symbol, 
-                    target_level, 
+                    place_xyz,
+                    symbol,
+                    target_level,
                     DB.Structure.StructuralType.NonStructural
                 )
 
-                set_elevation_from_level(inst, target_level, placement_pt.Z)
-
-                # Enforce absolute rotation relative to World X/Y regardless of View direction
-                set_absolute_instance_rotation(inst, placement_pt, rotation_rad)
-
+                set_elevation_from_level(inst, target_level, initial_z)
+                set_aligned_instance_rotation(inst, place_xyz, target_rotation_rad)
                 apply_penetration_parameters(inst, target_barrier, target_w, target_h, target_dia)
+                align_penetration_z_inside_ceiling(inst, ceiling_min_z, ceiling_max_z)
 
                 placed_count += 1
 
 t.Commit()
 
 forms.alert(
-    "Penetration Process Completed:\n\n"
+    "Ceiling Penetration Process Completed:\n\n"
     "- Newly Placed: {}\n"
     "- Updated: {}\n"
     "- Unchanged (Skipped): {}".format(placed_count, updated_count, skipped_count)

@@ -1,143 +1,142 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Penetration Generator" Width="520" SizeToContent="Height"
-        MaxHeight="850" WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
-        Background="#F5F5F5" FontFamily="Segoe UI">
-    <Grid Margin="15">
+        Title="CEILING PENETRATION GENERATOR" Width="660" SizeToContent="Height"
+        MaxHeight="880" WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
+        Background="#F8F9FA" FontFamily="Segoe UI" Foreground="#333333">
+    <Grid Margin="14">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Scrollable Content Area -->
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,10">
-            <StackPanel Margin="0,0,10,0">
-                <!-- 1st Selection: Host Model -->
-                <StackPanel Margin="0,0,0,10">
-                    <TextBlock Text="1. Select Structural/Host Model:" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <ComboBox Name="cb_LinkModel" Height="28" VerticalContentAlignment="Center"/>
-                </StackPanel>
+        <!-- PROMINENT TOOL IDENTITY BANNER (UNIFIED TEMPLATE) -->
+        <Border Grid.Row="0" Background="#EEF6FD" BorderBrush="#B8DAFF"
+                BorderThickness="1.2" CornerRadius="6" Padding="14,10" Margin="0,0,0,12">
+            <TextBlock Text="CEILING PENETRATION GENERATOR" FontSize="16" FontWeight="Bold" Foreground="#0275D8" VerticalAlignment="Center"/>
+        </Border>
 
-                <!-- 2nd Selection: Host Category (Locked per Button) & Type Filter Keyword -->
-                <GroupBox Header="2. Intersecting Host Element &amp; Filter" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
+        <!-- MAIN SCROLLABLE BODY -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,12">
+            <StackPanel>
+                <!-- STEP 1: HOST MODEL & FILTER -->
+                <Border Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,10">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="1.3*"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Margin="0,0,5,0">
-                            <TextBlock Text="Element Category:" FontSize="11" Margin="0,0,0,2"/>
-                            <ComboBox Name="cb_Category" Height="26" VerticalContentAlignment="Center" FontWeight="Normal" IsEnabled="False">
-                                <ComboBoxItem Content="Walls"/>
-                                <ComboBoxItem Content="Floors"/>
-                                <ComboBoxItem Content="Roofs"/>
-                                <ComboBoxItem Content="Ceilings"/>
-                            </ComboBox>
+                        <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                            <TextBlock Text="1. Host Model:" FontSize="11.5" FontWeight="Bold" Foreground="#333333" Margin="0,0,0,4"/>
+                            <ComboBox Name="cb_LinkModel" Height="27" VerticalContentAlignment="Center" Foreground="#333333"/>
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Margin="5,0,0,0">
-                            <TextBlock Text="Type Name Filter (Blank = All):" FontSize="11" Margin="0,0,0,2"/>
-                            <TextBox Name="tb_TypeFilterKeyword" Height="26" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
+                        <StackPanel Grid.Column="1" Margin="6,0,0,0">
+                            <TextBlock Text="Host Type Filter (Blank = All):" FontSize="11.5" FontWeight="Bold" Foreground="#333333" Margin="0,0,0,4"/>
+                            <TextBox Name="tb_TypeFilterKeyword" Height="27" VerticalContentAlignment="Center" Padding="5,0" Foreground="#333333"/>
                         </StackPanel>
                     </Grid>
-                </GroupBox>
+                </Border>
 
-                <!-- SECTION 3: RECTANGULAR DUCTS & ACCESSORIES -->
-                <GroupBox Header="3. Rectangular Ducts &amp; Accessories Configuration" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
+                <!-- STEP 2: TARGET SCOPE -->
+                <Border Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,0,0,10">
                     <StackPanel>
-                        <TextBlock Text="Select Family Symbol (Type to search):" FontSize="11" Margin="0,0,0,2"/>
-                        <ComboBox Name="cb_SymbolRect" Height="28" VerticalContentAlignment="Center" Margin="0,0,0,6" FontWeight="Normal"
-                                  IsEditable="True" IsTextSearchEnabled="False" KeyUp="OnRectComboKeyUp"/>
-                        
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Margin="0,0,5,0">
-                                <TextBlock Text="Offset Value (mm):" FontSize="11" Margin="0,0,0,2"/>
-                                <TextBox Name="tb_OffsetRect" Text="50" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Margin="5,0,0,0">
-                                <TextBlock Text="Rotation Angle:" FontSize="11" Margin="0,0,0,2"/>
-                                <ComboBox Name="cb_RotationRect" Height="24" VerticalContentAlignment="Center" FontWeight="Normal">
-                                    <ComboBoxItem Content="0°"/>
-                                    <ComboBoxItem Content="90° (Default)" IsSelected="True"/>
-                                </ComboBox>
-                            </StackPanel>
-                        </Grid>
+                        <TextBlock Text="2. Elements to Process:" FontSize="11.5" FontWeight="Bold" Foreground="#333333" Margin="0,0,0,6"/>
+                        <StackPanel Orientation="Horizontal">
+                            <CheckBox Name="chk_EnableMep" Content="Ducts &amp; Pipes" IsChecked="True" Margin="0,0,14,0" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
+                        <CheckBox Name="chk_EnableAirTerminal" Content="Air Terminals" IsChecked="True" Margin="0,0,14,0" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
+                        <CheckBox Name="chk_EnableGenericModel" Content="Generic Models" IsChecked="False" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
+                        </StackPanel>
                     </StackPanel>
-                </GroupBox>
+                </Border>
 
-                <!-- SECTION 4: ROUND DUCTS & ACCESSORIES -->
-                <GroupBox Header="4. Round Ducts &amp; Accessories Configuration" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
-                    <StackPanel>
-                        <TextBlock Text="Select Family Symbol (Type to search):" FontSize="11" Margin="0,0,0,2"/>
-                        <ComboBox Name="cb_SymbolRoundDuct" Height="28" VerticalContentAlignment="Center" Margin="0,0,0,6" FontWeight="Normal"
-                                  IsEditable="True" IsTextSearchEnabled="False" KeyUp="OnRoundDuctComboKeyUp"/>
-                        
-                        <Grid>
+                <!-- STEP 3: SETTINGS -->
+                <Border Background="White" BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="6" Padding="8">
+                    <Expander Name="exp_AdvancedSettings" IsExpanded="False">
+                        <Expander.Header>
+                            <TextBlock Text="3. Settings" FontSize="11.5" FontWeight="Bold" Foreground="#333333"/>
+                        </Expander.Header>
+                        <Grid Margin="2,8,2,2">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="108"/>
                                 <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="116"/>
+                                <ColumnDefinition Width="92"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Margin="0,0,5,0">
-                                <TextBlock Text="Offset Value (mm):" FontSize="11" Margin="0,0,0,2"/>
-                                <TextBox Name="tb_OffsetRoundDuct" Text="50" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Margin="5,0,0,0">
-                                <TextBlock Text="Rotation Angle:" FontSize="11" Margin="0,0,0,2"/>
-                                <ComboBox Name="cb_RotationRoundDuct" Height="24" VerticalContentAlignment="Center" FontWeight="Normal">
-                                    <ComboBoxItem Content="0°"/>
-                                    <ComboBoxItem Content="90° (Default)" IsSelected="True"/>
-                                </ComboBox>
-                            </StackPanel>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Element Type" Grid.Row="0" Grid.Column="0" FontWeight="Bold" FontSize="11" Foreground="#333333" Margin="0,0,4,6"/>
+                            <TextBlock Text="Penetration Family Types (Type to search)" Grid.Row="0" Grid.Column="1" FontWeight="Bold" FontSize="11" Foreground="#333333" Margin="0,0,6,6"/>
+                            <TextBlock Text="Overall Offset (mm)" Grid.Row="0" Grid.Column="2" FontWeight="Bold" FontSize="11" Foreground="#333333" Margin="0,0,6,6"/>
+                            <TextBlock Text="Rotation" Grid.Row="0" Grid.Column="3" FontWeight="Bold" FontSize="11" Foreground="#333333" Margin="0,0,0,6"/>
+                            <TextBlock Text="Rect Ducts &amp; DA" Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
+                            <ComboBox Name="cb_SymbolRect" Grid.Row="1" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
+                            <TextBox Name="tb_OffsetRect" Text="100" Grid.Row="1" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
+                            <ComboBox Name="cb_RotationRect" Grid.Row="1" Grid.Column="3" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,0,5">
+                                <ComboBoxItem Content="0° (Default)" IsSelected="True"/>
+                                <ComboBoxItem Content="90°"/>
+                            </ComboBox>
+                            <TextBlock Text="Round Ducts &amp; DA" Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
+                            <ComboBox Name="cb_SymbolRoundDuct" Grid.Row="2" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
+                            <TextBox Name="tb_OffsetRoundDuct" Text="100" Grid.Row="2" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
+                            <ComboBox Name="cb_RotationRoundDuct" Grid.Row="2" Grid.Column="3" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,0,5">
+                                <ComboBoxItem Content="0° (Default)" IsSelected="True"/>
+                                <ComboBoxItem Content="90°"/>
+                            </ComboBox>
+                            <TextBlock Text="Round Pipes" Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
+                            <ComboBox Name="cb_SymbolPipe" Grid.Row="3" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
+                            <TextBox Name="tb_OffsetPipe" Text="10" Grid.Row="3" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
+                            <ComboBox Name="cb_RotationPipe" Grid.Row="3" Grid.Column="3" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,0,5">
+                                <ComboBoxItem Content="0° (Default)" IsSelected="True"/>
+                                <ComboBoxItem Content="90°"/>
+                            </ComboBox>
+                            <TextBlock Text="Air Terminal (Rect)" Grid.Row="4" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
+                            <ComboBox Name="cb_SymbolAirTerminalRect" Grid.Row="4" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
+                            <TextBox Name="tb_OffsetAirTerminal" Text="10" Grid.Row="4" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
+                            <ComboBox Name="cb_RotationAirTerminalRect" Grid.Row="4" Grid.Column="3" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,0,5">
+                                <ComboBoxItem Content="0° (Default)" IsSelected="True"/>
+                                <ComboBoxItem Content="90°"/>
+                            </ComboBox>
+                            <TextBlock Text="Air Terminal (Swirl)" Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
+                            <ComboBox Name="cb_SymbolAirTerminalRound" Grid.Row="5" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
+                            <TextBox Name="tb_OffsetAirTerminalRound" Text="10" Grid.Row="5" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
+                            <ComboBox Name="cb_RotationAirTerminalRound" Grid.Row="5" Grid.Column="3" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,0,5">
+                                <ComboBoxItem Content="0° (Default)" IsSelected="True"/>
+                                <ComboBoxItem Content="90°"/>
+                            </ComboBox>
+                            <TextBlock Text="Generic Models" Grid.Row="6" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,0"/>
+                            <ComboBox Name="cb_SymbolGenericModel" Grid.Row="6" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,0" IsEditable="True" IsTextSearchEnabled="False"/>
+                            <TextBox Name="tb_OffsetGenericModel" Text="10" Grid.Row="6" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,0"/>
+                            <ComboBox Name="cb_RotationGenericModel" Grid.Row="6" Grid.Column="3" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,0,0">
+                                <ComboBoxItem Content="0° (Default)" IsSelected="True"/>
+                                <ComboBoxItem Content="90°"/>
+                            </ComboBox>
                         </Grid>
-                    </StackPanel>
-                </GroupBox>
-
-                <!-- SECTION 5: ROUND PIPES -->
-                <GroupBox Header="5. Round Pipes Configuration" Margin="0,0,0,10" Padding="8" FontWeight="SemiBold">
-                    <StackPanel>
-                        <TextBlock Text="Select Family Symbol (Type to search):" FontSize="11" Margin="0,0,0,2"/>
-                        <ComboBox Name="cb_SymbolPipe" Height="28" VerticalContentAlignment="Center" Margin="0,0,0,6" FontWeight="Normal"
-                                  IsEditable="True" IsTextSearchEnabled="False" KeyUp="OnPipeComboKeyUp"/>
-                        
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Margin="0,0,5,0">
-                                <TextBlock Text="Offset Value (mm):" FontSize="11" Margin="0,0,0,2"/>
-                                <TextBox Name="tb_OffsetPipe" Text="25" Height="24" VerticalContentAlignment="Center" Padding="4,0,0,0" FontWeight="Normal"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Margin="5,0,0,0">
-                                <TextBlock Text="Rotation Angle:" FontSize="11" Margin="0,0,0,2"/>
-                                <ComboBox Name="cb_RotationPipe" Height="24" VerticalContentAlignment="Center" FontWeight="Normal">
-                                    <ComboBoxItem Content="0°"/>
-                                    <ComboBoxItem Content="90° (Default)" IsSelected="True"/>
-                                </ComboBox>
-                            </StackPanel>
-                        </Grid>
-                    </StackPanel>
-                </GroupBox>
+                    </Expander>
+                </Border>
             </StackPanel>
         </ScrollViewer>
 
-        <!-- Action Buttons -->
-        <Grid Grid.Row="1" Margin="0,5,0,0">
+        <!-- ACTION BUTTONS -->
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="1.2*"/>
-                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="1.25*"/>
+                <ColumnDefinition Width="85"/>
             </Grid.ColumnDefinitions>
-            
+
             <Button Name="btn_PickElements" Content="PICK ELEMENTS" Grid.Column="0" Height="36" Margin="0,0,4,0"
-                    Background="#2ECC71" Foreground="White" FontWeight="Bold" BorderThickness="0" Click="OnPickElements"/>
-            <Button Name="btn_EntireView" Content="ENTIRE ACTIVE VIEW" Grid.Column="1" Height="36" Margin="2,0,4,0"
-                    Background="#007ACC" Foreground="White" FontWeight="Bold" BorderThickness="0" Click="OnEntireView"/>
-            <Button Name="btn_Cancel" Content="CANCEL" Grid.Column="2" Width="85" Height="36"
-                    Background="#D3D3D3" Foreground="#333333" FontWeight="Bold" BorderThickness="0" Click="OnCancel"/>
+                    Background="#4FD97D" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+            <Button Name="btn_EntireView" Content="ENTIRE ACTIVE VIEW" Grid.Column="1" Height="36" Margin="4,0,4,0"
+                    Background="#0275D8" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+            <Button Name="btn_Cancel" Content="CANCEL" Grid.Column="2" Height="36" Margin="4,0,0,0"
+                    Background="#E0E0E0" Foreground="#333333" FontWeight="Bold" BorderThickness="0"/>
         </Grid>
     </Grid>
 </Window>
