@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="CEILING PENETRATION GENERATOR" Width="660" SizeToContent="Height"
+        Title="CEILING PENETRATION GENERATOR" Width="680" SizeToContent="Height"
         MaxHeight="880" WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
         Background="#F8F9FA" FontFamily="Segoe UI" Foreground="#333333">
     <Grid Margin="14">
@@ -43,8 +43,8 @@
                         <TextBlock Text="2. Elements to Process:" FontSize="11.5" FontWeight="Bold" Foreground="#333333" Margin="0,0,0,6"/>
                         <StackPanel Orientation="Horizontal">
                             <CheckBox Name="chk_EnableMep" Content="Ducts &amp; Pipes" IsChecked="True" Margin="0,0,14,0" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
-                        <CheckBox Name="chk_EnableAirTerminal" Content="Air Terminals" IsChecked="True" Margin="0,0,14,0" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
-                        <CheckBox Name="chk_EnableGenericModel" Content="Generic Models" IsChecked="False" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
+                            <CheckBox Name="chk_EnableAirTerminal" Content="Air Terminals" IsChecked="False" Margin="0,0,14,0" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
+                            <CheckBox Name="chk_EnableGenericModel" Content="Generic Models" IsChecked="False" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -60,7 +60,7 @@
                                 <ColumnDefinition Width="108"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="116"/>
-                                <ColumnDefinition Width="92"/>
+                                <ColumnDefinition Width="106"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>

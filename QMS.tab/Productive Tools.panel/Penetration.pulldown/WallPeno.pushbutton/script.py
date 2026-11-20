@@ -17,9 +17,17 @@ doc = revit.doc
 uidoc = revit.uidoc
 
 # ==============================================================================
-# TOOL CONFIGURATION (WALL PENETRATION WITH AIR TERMINALS & FIRE WALL FOR ALL DUCTS)
+# TOOL CONFIGURATION
 # ==============================================================================
 LOCKED_HOST_CATEGORY_NAME = "Walls"
+IS_WALL_TOOL = True
+IS_FLOOR_TOOL = False
+IS_ROOF_TOOL = False
+IS_CEILING_TOOL = False
+HAS_AIR_TERMINAL = True
+
+# Pre-filled QMS default family types (editable by user via dropdown)
+DEFAULT_SYMBOLS = {'rect': 'GM_Peno_Square_Wall_Mech_QMS : Mech - Duct', 'rduct': 'GM_Peno_Round_Wall_Mech_QMS : Mech - Duct', 'pipe': 'GM_Peno_Round_Wall_Mech_QMS : Mech - Pipe', 'at_rect': 'GM_Peno_Square_Wall_Mech_QMS : Mech - Duct', 'at_round': 'GM_Peno_Round_Wall_Mech_QMS : Mech - Duct', 'gm': 'GM_Peno_Square_Wall_Mech_QMS : Mech - Duct'}
 
 CURRENT_MODEL_OPTION = "<Current Active Model>"
 BASE_MEP_CATEGORIES = [
@@ -31,7 +39,8 @@ BASE_MEP_CATEGORIES = [
     DB.BuiltInCategory.OST_PipeFitting
 ]
 
-CFG_KEY = "PenetrationGeneratorSettings_v4_{}".format(LOCKED_HOST_CATEGORY_NAME)
+# Versioned config key (v5) so updated QMS default family types load cleanly
+CFG_KEY = "PenetrationGeneratorSettings_v5_{}".format(LOCKED_HOST_CATEGORY_NAME)
 cfg = script.get_config(CFG_KEY)
 
 
@@ -131,12 +140,14 @@ class PenetrationUI(forms.WPFWindow):
         self.mode = None
         self.target_doc = None
         self.target_link_inst = None
-        self.selected_category_bic = DB.BuiltInCategory.OST_Walls
+        self.selected_category_bic = None
         self.type_filter_keyword = ""
 
+        self.bund_width_feet = 0.0
+        self.bund_thickness_feet = 0.0
         self.is_fire_wall = False
         self.enable_mep = True
-        self.enable_air_terminal = True
+        self.enable_air_terminal = False
         self.enable_generic_model = False
 
         self.config = {}
@@ -147,20 +158,24 @@ class PenetrationUI(forms.WPFWindow):
 
         self.chk_EnableMep.Checked += self.OnScopeChanged
         self.chk_EnableMep.Unchecked += self.OnScopeChanged
-        self.chk_EnableAirTerminal.Checked += self.OnScopeChanged
-        self.chk_EnableAirTerminal.Unchecked += self.OnScopeChanged
         self.chk_EnableGenericModel.Checked += self.OnScopeChanged
         self.chk_EnableGenericModel.Unchecked += self.OnScopeChanged
 
-        self.chk_FireWall.Checked += self.OnFireWallChanged
-        self.chk_FireWall.Unchecked += self.OnFireWallChanged
+        if HAS_AIR_TERMINAL:
+            self.chk_EnableAirTerminal.Checked += self.OnScopeChanged
+            self.chk_EnableAirTerminal.Unchecked += self.OnScopeChanged
+
+        if IS_WALL_TOOL:
+            self.chk_FireWall.Checked += self.OnFireWallChanged
+            self.chk_FireWall.Unchecked += self.OnFireWallChanged
 
         self.cb_SymbolRect.KeyUp += self.OnComboKeyUp
         self.cb_SymbolRoundDuct.KeyUp += self.OnComboKeyUp
         self.cb_SymbolPipe.KeyUp += self.OnComboKeyUp
-        self.cb_SymbolAirTerminalRect.KeyUp += self.OnComboKeyUp
-        self.cb_SymbolAirTerminalRound.KeyUp += self.OnComboKeyUp
         self.cb_SymbolGenericModel.KeyUp += self.OnComboKeyUp
+        if HAS_AIR_TERMINAL:
+            self.cb_SymbolAirTerminalRect.KeyUp += self.OnComboKeyUp
+            self.cb_SymbolAirTerminalRound.KeyUp += self.OnComboKeyUp
 
         self.populate_models()
         self.populate_symbols()
@@ -205,27 +220,41 @@ class PenetrationUI(forms.WPFWindow):
             "{} : {}".format(s.Family.Name, DB.Element.Name.__get__(s)): s
             for s in symbols
         }
+        self.symbol_map_lower = {k.lower(): k for k in self.symbol_map}
         self.all_symbol_names = sorted(self.symbol_map.keys())
 
-        combos = [
-            self.cb_SymbolRect, self.cb_SymbolRoundDuct, self.cb_SymbolPipe,
-            self.cb_SymbolAirTerminalRect, self.cb_SymbolAirTerminalRound,
-            self.cb_SymbolGenericModel
-        ]
+        combos = [self.cb_SymbolRect, self.cb_SymbolRoundDuct, self.cb_SymbolPipe, self.cb_SymbolGenericModel]
+        if HAS_AIR_TERMINAL:
+            combos.extend([self.cb_SymbolAirTerminalRect, self.cb_SymbolAirTerminalRound])
+
         for cb in combos:
             self.filter_combobox(cb, "", set_drop_open=False)
 
-    def auto_match_qms_symbol(self, shape_keywords):
-        host_kw = "wall"
+    def resolve_default_symbol(self, key, shape_keywords, type_keyword):
+        """
+        Resolves pre-filled family type in priority order:
+        1. Exact QMS standard Family : Type name (case-insensitive)
+        2. Smart keyword fallback matching host + shape + type ('pipe'/'duct')
+        """
+        preferred = DEFAULT_SYMBOLS.get(key)
+        if preferred:
+            if preferred in self.symbol_map:
+                return preferred
+            low_pref = preferred.lower()
+            if low_pref in self.symbol_map_lower:
+                return self.symbol_map_lower[low_pref]
+
+        host_kw = LOCKED_HOST_CATEGORY_NAME[:-1].lower()
         best_match = None
         for name in self.all_symbol_names:
             low = name.lower()
-            if "peno" in low and host_kw in low:
-                if any(sk in low for sk in shape_keywords):
+            if "peno" in low and host_kw in low and any(sk in low for sk in shape_keywords):
+                if type_keyword in low:
                     if "qms" in low:
                         return name
-                    if not best_match:
-                        best_match = name
+                    best_match = name
+                elif not best_match:
+                    best_match = name
         return best_match
 
     def set_rotation_combo(self, cb_rot, rot_text):
@@ -244,27 +273,30 @@ class PenetrationUI(forms.WPFWindow):
         self.tb_OffsetPipe.IsEnabled = mep_en
         self.cb_RotationPipe.IsEnabled = mep_en
 
-        # Fire Wall ON -> Auto (25 / 50) applies to BOTH Rect Ducts & DA and Round Ducts & DA
-        is_fw = bool(self.chk_FireWall.IsChecked)
-        self.tb_OffsetRect.IsEnabled = mep_en and (not is_fw)
-        self.tb_OffsetRoundDuct.IsEnabled = mep_en and (not is_fw)
-
-        if is_fw:
-            self.tb_OffsetRect.Text = "Auto (25 / 50)"
-            self.tb_OffsetRoundDuct.Text = "Auto (25 / 50)"
+        if IS_WALL_TOOL:
+            is_fw = bool(self.chk_FireWall.IsChecked)
+            self.tb_OffsetRect.IsEnabled = mep_en and (not is_fw)
+            self.tb_OffsetRoundDuct.IsEnabled = mep_en and (not is_fw)
+            if is_fw:
+                self.tb_OffsetRect.Text = "Auto (25 / 50)"
+                self.tb_OffsetRoundDuct.Text = "Auto (25 / 50)"
+            else:
+                if "Auto" in self.tb_OffsetRect.Text:
+                    self.tb_OffsetRect.Text = "100"
+                if "Auto" in self.tb_OffsetRoundDuct.Text:
+                    self.tb_OffsetRoundDuct.Text = "100"
         else:
-            if "Auto" in self.tb_OffsetRect.Text:
-                self.tb_OffsetRect.Text = "100"
-            if "Auto" in self.tb_OffsetRoundDuct.Text:
-                self.tb_OffsetRoundDuct.Text = "100"
+            self.tb_OffsetRect.IsEnabled = mep_en
+            self.tb_OffsetRoundDuct.IsEnabled = mep_en
 
-        at_en = bool(self.chk_EnableAirTerminal.IsChecked)
-        self.cb_SymbolAirTerminalRect.IsEnabled = at_en
-        self.tb_OffsetAirTerminal.IsEnabled = at_en
-        self.cb_RotationAirTerminalRect.IsEnabled = at_en
-        self.cb_SymbolAirTerminalRound.IsEnabled = at_en
-        self.tb_OffsetAirTerminalRound.IsEnabled = at_en
-        self.cb_RotationAirTerminalRound.IsEnabled = at_en
+        if HAS_AIR_TERMINAL:
+            at_en = bool(self.chk_EnableAirTerminal.IsChecked)
+            self.cb_SymbolAirTerminalRect.IsEnabled = at_en
+            self.tb_OffsetAirTerminal.IsEnabled = at_en
+            self.cb_RotationAirTerminalRect.IsEnabled = at_en
+            self.cb_SymbolAirTerminalRound.IsEnabled = at_en
+            self.tb_OffsetAirTerminalRound.IsEnabled = at_en
+            self.cb_RotationAirTerminalRound.IsEnabled = at_en
 
         gm_en = bool(self.chk_EnableGenericModel.IsChecked)
         self.cb_SymbolGenericModel.IsEnabled = gm_en
@@ -290,28 +322,42 @@ class PenetrationUI(forms.WPFWindow):
             if last_type_kw is not None:
                 self.tb_TypeFilterKeyword.Text = str(last_type_kw)
 
-            self.chk_EnableMep.IsChecked = bool(cfg.get_option("last_enable_mep", True))
-            self.chk_EnableAirTerminal.IsChecked = bool(cfg.get_option("last_enable_at", True))
-            self.chk_EnableGenericModel.IsChecked = bool(cfg.get_option("last_enable_gm", False))
-            self.chk_FireWall.IsChecked = bool(cfg.get_option("last_fire_wall", False))
+            # Enforce default scope on open: ONLY Ducts & Pipes ticked; others unticked
+            self.chk_EnableMep.IsChecked = True
+            self.chk_EnableGenericModel.IsChecked = False
+            if HAS_AIR_TERMINAL:
+                self.chk_EnableAirTerminal.IsChecked = False
+
+            if IS_FLOOR_TOOL:
+                last_bund_w = cfg.get_option("last_bund_width", None)
+                if last_bund_w is not None:
+                    self.tb_BundWidth.Text = str(last_bund_w)
+                last_bund_t = cfg.get_option("last_bund_thickness", None)
+                if last_bund_t is not None:
+                    self.tb_BundThickness.Text = str(last_bund_t)
+
+            if IS_WALL_TOOL:
+                self.chk_FireWall.IsChecked = False
 
             fields = [
-                ("rect", self.cb_SymbolRect, self.tb_OffsetRect, self.cb_RotationRect, ["square", "rect"], True),
-                ("rduct", self.cb_SymbolRoundDuct, self.tb_OffsetRoundDuct, self.cb_RotationRoundDuct, ["round", "circ"], True),
-                ("pipe", self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe, ["round", "pipe", "circ"], True),
-                ("at_rect", self.cb_SymbolAirTerminalRect, self.tb_OffsetAirTerminal, self.cb_RotationAirTerminalRect, ["square", "rect"], True),
-                ("at_round", self.cb_SymbolAirTerminalRound, self.tb_OffsetAirTerminalRound, self.cb_RotationAirTerminalRound, ["round", "circ"], True),
-                ("gm", self.cb_SymbolGenericModel, self.tb_OffsetGenericModel, self.cb_RotationGenericModel, ["square", "rect"], False),
+                ("rect", self.cb_SymbolRect, self.tb_OffsetRect, self.cb_RotationRect, ["square", "rect"], "duct", True),
+                ("rduct", self.cb_SymbolRoundDuct, self.tb_OffsetRoundDuct, self.cb_RotationRoundDuct, ["round", "circ"], "duct", True),
+                ("pipe", self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe, ["round", "circ"], "pipe", True),
+                ("gm", self.cb_SymbolGenericModel, self.tb_OffsetGenericModel, self.cb_RotationGenericModel, ["square", "rect"], "duct", False),
             ]
+            if HAS_AIR_TERMINAL:
+                fields.append(("at_rect", self.cb_SymbolAirTerminalRect, self.tb_OffsetAirTerminal, self.cb_RotationAirTerminalRect, ["square", "rect"], "duct", False))
+                fields.append(("at_round", self.cb_SymbolAirTerminalRound, self.tb_OffsetAirTerminalRound, self.cb_RotationAirTerminalRound, ["round", "circ"], "duct", False))
 
-            for key, cb_sym, tb_off, cb_rot, shape_kws, is_primary in fields:
-                sym = cfg.get_option("last_sym_" + key, None)
-                if sym and sym in self.symbol_map:
-                    cb_sym.Text = sym
+            for key, cb_sym, tb_off, cb_rot, shape_kws, type_kw, is_primary in fields:
+                # 1. Restore user-chosen family type if valid in current project; otherwise pre-fill QMS default
+                saved_sym = cfg.get_option("last_sym_" + key, None)
+                if saved_sym and saved_sym in self.symbol_map:
+                    cb_sym.Text = saved_sym
                 else:
-                    auto_sym = self.auto_match_qms_symbol(shape_kws)
-                    if auto_sym:
-                        cb_sym.Text = auto_sym
+                    default_sym = self.resolve_default_symbol(key, shape_kws, type_kw)
+                    if default_sym:
+                        cb_sym.Text = default_sym
                     elif is_primary:
                         missing_required_symbol = True
 
@@ -323,6 +369,7 @@ class PenetrationUI(forms.WPFWindow):
                 if rot:
                     self.set_rotation_combo(cb_rot, str(rot))
 
+            # Auto-expand Settings only if a required primary QMS family isn't loaded in this project
             if missing_required_symbol:
                 self.exp_AdvancedSettings.IsExpanded = True
         except Exception:
@@ -334,22 +381,24 @@ class PenetrationUI(forms.WPFWindow):
                 cfg.set_option("last_host_model", str(self.cb_LinkModel.SelectedItem))
 
             cfg.set_option("last_type_kw", self.tb_TypeFilterKeyword.Text)
-            cfg.set_option("last_enable_mep", bool(self.chk_EnableMep.IsChecked))
-            cfg.set_option("last_enable_at", bool(self.chk_EnableAirTerminal.IsChecked))
-            cfg.set_option("last_enable_gm", bool(self.chk_EnableGenericModel.IsChecked))
-            cfg.set_option("last_fire_wall", bool(self.chk_FireWall.IsChecked))
+
+            if IS_FLOOR_TOOL:
+                cfg.set_option("last_bund_width", self.tb_BundWidth.Text)
+                cfg.set_option("last_bund_thickness", self.tb_BundThickness.Text)
 
             fields = [
                 ("rect", self.cb_SymbolRect, self.tb_OffsetRect, self.cb_RotationRect),
                 ("rduct", self.cb_SymbolRoundDuct, self.tb_OffsetRoundDuct, self.cb_RotationRoundDuct),
                 ("pipe", self.cb_SymbolPipe, self.tb_OffsetPipe, self.cb_RotationPipe),
-                ("at_rect", self.cb_SymbolAirTerminalRect, self.tb_OffsetAirTerminal, self.cb_RotationAirTerminalRect),
-                ("at_round", self.cb_SymbolAirTerminalRound, self.tb_OffsetAirTerminalRound, self.cb_RotationAirTerminalRound),
                 ("gm", self.cb_SymbolGenericModel, self.tb_OffsetGenericModel, self.cb_RotationGenericModel),
             ]
+            if HAS_AIR_TERMINAL:
+                fields.append(("at_rect", self.cb_SymbolAirTerminalRect, self.tb_OffsetAirTerminal, self.cb_RotationAirTerminalRect))
+                fields.append(("at_round", self.cb_SymbolAirTerminalRound, self.tb_OffsetAirTerminalRound, self.cb_RotationAirTerminalRound))
 
             for key, cb_sym, tb_off, cb_rot in fields:
-                cfg.set_option("last_sym_" + key, cb_sym.Text)
+                if cb_sym.Text in self.symbol_map:
+                    cfg.set_option("last_sym_" + key, cb_sym.Text)
                 if "Auto" not in tb_off.Text:
                     cfg.set_option("last_overall_off_" + key, tb_off.Text)
                 rot_val = cb_rot.SelectedItem.Content.ToString() if cb_rot.SelectedItem else cb_rot.Text
@@ -412,18 +461,46 @@ class PenetrationUI(forms.WPFWindow):
             return False
 
         self.target_doc, self.target_link_inst = self.model_map[selected_model]
-        self.selected_category_bic = DB.BuiltInCategory.OST_Walls
+
+        cat_dict = {
+            "Walls": DB.BuiltInCategory.OST_Walls,
+            "Floors": DB.BuiltInCategory.OST_Floors,
+            "Roofs": DB.BuiltInCategory.OST_Roofs,
+            "Ceilings": DB.BuiltInCategory.OST_Ceilings
+        }
+        self.selected_category_bic = cat_dict.get(LOCKED_HOST_CATEGORY_NAME, DB.BuiltInCategory.OST_Walls)
         self.type_filter_keyword = self.tb_TypeFilterKeyword.Text.strip().lower()
 
         self.enable_mep = bool(self.chk_EnableMep.IsChecked)
-        self.enable_air_terminal = bool(self.chk_EnableAirTerminal.IsChecked)
+        self.enable_air_terminal = bool(self.chk_EnableAirTerminal.IsChecked) if HAS_AIR_TERMINAL else False
         self.enable_generic_model = bool(self.chk_EnableGenericModel.IsChecked)
 
         if not (self.enable_mep or self.enable_air_terminal or self.enable_generic_model):
             forms.alert("Please tick at least one element type in Section 2.")
             return False
 
-        self.is_fire_wall = bool(self.chk_FireWall.IsChecked)
+        if IS_FLOOR_TOOL:
+            try:
+                val_w = float(self.tb_BundWidth.Text)
+                if val_w <= 0:
+                    forms.alert("Bund Width must be greater than 0 mm.")
+                    return False
+                self.bund_width_feet = mm_to_feet(val_w)
+            except ValueError:
+                forms.alert("Invalid Bund Width value.")
+                return False
+
+            try:
+                val_t = float(self.tb_BundThickness.Text)
+                if val_t < 0:
+                    forms.alert("Bund Height cannot be negative.")
+                    return False
+                self.bund_thickness_feet = mm_to_feet(val_t)
+            except ValueError:
+                forms.alert("Invalid Bund Height value.")
+                return False
+
+        self.is_fire_wall = bool(self.chk_FireWall.IsChecked) if IS_WALL_TOOL else False
 
         if self.enable_mep:
             rect_cfg = self.parse_profile_config(
@@ -589,28 +666,68 @@ def get_element_solid(elem, transform=None):
     return unified_solid
 
 
-def get_wall_thickness(wall_elem):
-    """ Reads exact Wall Thickness for BarrierThickness """
+def get_solid_z_bounds(solid):
+    """ Returns exact world (min_z, max_z) from solid vertices """
+    min_z = None
+    max_z = None
     try:
-        elem_type = wall_elem.Document.GetElement(wall_elem.GetTypeId())
-        if elem_type:
-            p_w = elem_type.get_Parameter(DB.BuiltInParameter.WALL_ATTR_WIDTH_PARAM)
-            if p_w and p_w.HasValue and p_w.AsDouble() > 0:
-                return p_w.AsDouble()
+        for edge in solid.Edges:
+            for pt in edge.Tessellate():
+                if min_z is None or pt.Z < min_z:
+                    min_z = pt.Z
+                if max_z is None or pt.Z > max_z:
+                    max_z = pt.Z
+    except Exception:
+        pass
 
-            if hasattr(elem_type, "Width") and elem_type.Width > 0:
-                return elem_type.Width
+    if min_z is not None and max_z is not None:
+        return min_z, max_z
+
+    try:
+        bb = solid.GetBoundingBox()
+        if bb:
+            p1 = bb.Transform.OfPoint(bb.Min)
+            p2 = bb.Transform.OfPoint(bb.Max)
+            return min(p1.Z, p2.Z), max(p1.Z, p2.Z)
+    except Exception:
+        pass
+    return None, None
+
+
+def get_host_thickness(host_elem, host_solid=None):
+    """ Reads exact Host Thickness (Wall/Floor/Roof/Ceiling) for BarrierThickness """
+    try:
+        elem_type = host_elem.Document.GetElement(host_elem.GetTypeId())
+        if elem_type:
+            for bip in [
+                DB.BuiltInParameter.WALL_ATTR_WIDTH_PARAM,
+                DB.BuiltInParameter.FLOOR_ATTR_THICKNESS_PARAM,
+                DB.BuiltInParameter.ROOF_ATTR_THICKNESS_PARAM,
+                DB.BuiltInParameter.CEILING_THICKNESS
+            ]:
+                p_bip = elem_type.get_Parameter(bip)
+                if p_bip and p_bip.HasValue and p_bip.AsDouble() > 0:
+                    return p_bip.AsDouble()
 
             if hasattr(elem_type, "GetCompoundStructure"):
                 cs = elem_type.GetCompoundStructure()
                 if cs and cs.GetWidth() > 0:
                     return cs.GetWidth()
 
-            p_thick = elem_type.LookupParameter("Thickness") or wall_elem.LookupParameter("Thickness")
+            p_thick = elem_type.LookupParameter("Thickness") or host_elem.LookupParameter("Thickness")
             if p_thick and p_thick.HasValue and p_thick.AsDouble() > 0:
                 return p_thick.AsDouble()
+
+            if hasattr(elem_type, "Width") and elem_type.Width > 0:
+                return elem_type.Width
     except Exception:
         pass
+
+    if (IS_FLOOR_TOOL or IS_CEILING_TOOL) and host_solid:
+        min_z, max_z = get_solid_z_bounds(host_solid)
+        if min_z is not None and max_z is not None and (max_z - min_z) > 0:
+            return max_z - min_z
+
     return 0.0
 
 
@@ -664,10 +781,13 @@ def get_air_terminal_dimensions(elem):
 
     bb = elem.get_BoundingBox(None)
     if bb:
-        dx = abs(bb.Max.X - bb.Min.X)
-        dy = abs(bb.Max.Y - bb.Min.Y)
-        dz = abs(bb.Max.Z - bb.Min.Z)
-        w, h = max(dx, dy), dz
+        if IS_WALL_TOOL:
+            dx = abs(bb.Max.X - bb.Min.X)
+            dy = abs(bb.Max.Y - bb.Min.Y)
+            dz = abs(bb.Max.Z - bb.Min.Z)
+            w, h = max(dx, dy), dz
+        else:
+            w, h = abs(bb.Max.X - bb.Min.X), abs(bb.Max.Y - bb.Min.Y)
         if is_round_keyword:
             dia = max(w, h)
             return dia, dia, dia, True
@@ -693,16 +813,20 @@ def get_generic_model_dimensions(elem):
                         sx = abs(sym_bb.Max.X - sym_bb.Min.X)
                         sy = abs(sym_bb.Max.Y - sym_bb.Min.Y)
                         sz = abs(sym_bb.Max.Z - sym_bb.Min.Z)
-                        return max(sx, sy), sz, 0.0
+                        if IS_WALL_TOOL:
+                            return max(sx, sy), sz, 0.0
+                        return sx, sy, 0.0
     except Exception:
         pass
 
     bb = elem.get_BoundingBox(None)
     if bb:
-        dx = abs(bb.Max.X - bb.Min.X)
-        dy = abs(bb.Max.Y - bb.Min.Y)
-        dz = abs(bb.Max.Z - bb.Min.Z)
-        return max(dx, dy), dz, 0.0
+        if IS_WALL_TOOL:
+            dx = abs(bb.Max.X - bb.Min.X)
+            dy = abs(bb.Max.Y - bb.Min.Y)
+            dz = abs(bb.Max.Z - bb.Min.Z)
+            return max(dx, dy), dz, 0.0
+        return abs(bb.Max.X - bb.Min.X), abs(bb.Max.Y - bb.Min.Y), 0.0
 
     return 0.0, 0.0, 0.0
 
@@ -730,6 +854,10 @@ def get_mep_dimensions(mep_elem):
 
 
 def get_element_orientation_angle(elem):
+    """
+    Returns exact XY orientation angle (radians) using HandOrientation (X-axis)
+    to stay 100% consistent with get_instance_hand_angle(inst).
+    """
     try:
         if isinstance(elem, DB.FamilyInstance):
             hand = elem.HandOrientation
@@ -738,12 +866,13 @@ def get_element_orientation_angle(elem):
             if isinstance(elem.Location, DB.LocationPoint):
                 return elem.Location.Rotation
 
-        if hasattr(elem, "Location") and elem.Location and isinstance(elem.Location, DB.LocationCurve) and elem.Location.Curve:
-            p0 = elem.Location.Curve.GetEndPoint(0)
-            p1 = elem.Location.Curve.GetEndPoint(1)
-            dx, dy = p1.X - p0.X, p1.Y - p0.Y
-            if abs(dx) > 1e-5 or abs(dy) > 1e-5:
-                return math.atan2(dy, dx)
+        if IS_WALL_TOOL:
+            if hasattr(elem, "Location") and elem.Location and isinstance(elem.Location, DB.LocationCurve) and elem.Location.Curve:
+                p0 = elem.Location.Curve.GetEndPoint(0)
+                p1 = elem.Location.Curve.GetEndPoint(1)
+                dx, dy = p1.X - p0.X, p1.Y - p0.Y
+                if abs(dx) > 1e-5 or abs(dy) > 1e-5:
+                    return math.atan2(dy, dx)
 
         if hasattr(elem, "ConnectorManager") and elem.ConnectorManager:
             for conn in elem.ConnectorManager.Connectors:
@@ -753,8 +882,15 @@ def get_element_orientation_angle(elem):
                     if abs(bx.X) > 1e-5 or abs(bx.Y) > 1e-5:
                         return math.atan2(bx.Y, bx.X)
 
-        if hasattr(elem, "Location") and isinstance(elem.Location, DB.LocationPoint):
-            return elem.Location.Rotation
+        if hasattr(elem, "Location") and elem.Location:
+            if isinstance(elem.Location, DB.LocationCurve) and elem.Location.Curve:
+                p0 = elem.Location.Curve.GetEndPoint(0)
+                p1 = elem.Location.Curve.GetEndPoint(1)
+                dx, dy = p1.X - p0.X, p1.Y - p0.Y
+                if abs(dx) > 1e-5 or abs(dy) > 1e-5:
+                    return math.atan2(dy, dx)
+            elif isinstance(elem.Location, DB.LocationPoint):
+                return elem.Location.Rotation
     except Exception:
         pass
     return 0.0
@@ -847,7 +983,36 @@ def set_elevation_from_level(inst, target_level, absolute_z):
             DB.ElementTransformUtils.MoveElement(doc, inst.Id, DB.XYZ(0, 0, dz))
 
 
-def apply_penetration_parameters(inst, target_barrier, target_w, target_h, target_dia):
+def align_penetration_z_to_target_mid(inst, target_mid_z):
+    """
+    Aligns penetration's actual geometry midpoint Z to target_mid_z
+    so Roof (including sloped roofs) and Ceiling penetrations sit flush inside host.
+    """
+    if target_mid_z is None:
+        return False
+
+    try:
+        doc.Regenerate()
+        bb = inst.get_BoundingBox(None)
+        if not bb:
+            return False
+
+        cur_mid_z = (bb.Min.Z + bb.Max.Z) / 2.0
+        dz = target_mid_z - cur_mid_z
+
+        if abs(dz) > 0.001:
+            p_elev = get_elevation_param(inst)
+            if p_elev:
+                p_elev.Set(p_elev.AsDouble() + dz)
+            else:
+                DB.ElementTransformUtils.MoveElement(doc, inst.Id, DB.XYZ(0, 0, dz))
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def apply_penetration_parameters(inst, target_barrier, target_w, target_h, target_dia, bund_width=0.0, bund_thickness=0.0):
     if target_barrier > 0:
         for b_name in ["BarrierThickness", "Barrier Thickness"]:
             p_b = inst.LookupParameter(b_name)
@@ -860,11 +1025,19 @@ def apply_penetration_parameters(inst, target_barrier, target_w, target_h, targe
         "Width": target_w,
         "Height": target_h
     }
+    if IS_FLOOR_TOOL:
+        params["Bund_Width"] = bund_width
+
     for param_name, value in params.items():
         if value > 0:
             p = inst.LookupParameter(param_name)
             if p and not p.IsReadOnly:
                 p.Set(value)
+
+    if IS_FLOOR_TOOL:
+        p_bund_t = inst.LookupParameter("Bund_Thickness")
+        if p_bund_t and not p_bund_t.IsReadOnly and bund_thickness >= 0:
+            p_bund_t.Set(bund_thickness)
 
 
 def find_existing_penetration(pt, radius=1.0):
@@ -882,7 +1055,7 @@ def find_existing_penetration(pt, radius=1.0):
         if isinstance(inst.Location, DB.LocationPoint):
             dist_xy = math.hypot(inst.Location.Point.X - pt.X, inst.Location.Point.Y - pt.Y)
             dist_z = abs(inst.Location.Point.Z - pt.Z)
-            if dist_xy <= radius and dist_z <= max(radius, 1.5):
+            if dist_xy <= radius and dist_z <= max(radius, 2.0):
                 if inst.LookupParameter("BarrierThickness") is not None or inst.LookupParameter("Barrier Thickness") is not None:
                     return inst
     return None
@@ -921,6 +1094,8 @@ link_inst = win.target_link_inst
 category_bic = win.selected_category_bic
 type_kw = win.type_filter_keyword
 config = win.config
+bund_width_feet = win.bund_width_feet
+bund_thickness_feet = win.bund_thickness_feet
 is_fire_wall = win.is_fire_wall
 
 link_transform = link_inst.GetTotalTransform() if link_inst else DB.Transform.Identity
@@ -974,10 +1149,10 @@ elif win.mode == "ENTIRE_VIEW":
 
     confirm_msg = (
         u"WARNING: You are about to generate/update penetrations for {} element(s) in Active View:\n"
-        u"\u2022 Tool: Wall Penetration\n"
+        u"\u2022 Tool: {} Penetration\n"
         u"\u2022 View Name: {}\n\n"
         u"Do you want to proceed?"
-    ).format(len(mep_elements), doc.ActiveView.Name)
+    ).format(len(mep_elements), LOCKED_HOST_CATEGORY_NAME[:-1], doc.ActiveView.Name)
 
     user_choice = forms.alert(
         confirm_msg,
@@ -1000,16 +1175,17 @@ all_hosts = DB.FilteredElementCollector(target_host_doc)\
 host_elements = [h for h in all_hosts if not type_kw or type_kw in get_element_type_name(h)]
 
 if not host_elements:
-    forms.alert("No wall elements matching filter were found.")
+    forms.alert("No host elements matching category and filter were found.")
     sys.exit()
 
-# Pre-cache wall solids and exact thicknesses
+# Pre-cache host solids, Z bounds (for Floor/Ceiling), and exact thicknesses
 host_cache = []
 for h in host_elements:
     h_solid = get_element_solid(h, link_transform)
     if h_solid:
-        h_thick = get_wall_thickness(h)
-        host_cache.append((h, h_solid, h_thick))
+        h_min_z, h_max_z = get_solid_z_bounds(h_solid) if (IS_FLOOR_TOOL or IS_CEILING_TOOL) else (None, None)
+        h_thick = get_host_thickness(h, h_solid)
+        host_cache.append((h, h_solid, h_min_z, h_max_z, h_thick))
 
 view_outline = get_view_crop_outline(doc.ActiveView)
 
@@ -1017,7 +1193,7 @@ placed_count = 0
 updated_count = 0
 skipped_count = 0
 
-t = DB.Transaction(doc, "Generate/Update Wall Penetrations")
+t = DB.Transaction(doc, "Generate/Update {} Penetrations".format(LOCKED_HOST_CATEGORY_NAME[:-1]))
 t.Start()
 
 for profile_key in config:
@@ -1095,7 +1271,7 @@ for mep_elem in mep_elements:
         offset_feet = prof_cfg["offset_feet"]
         ui_rotation_rad = prof_cfg["rotation_rad"]
         _, _, mep_dia = get_mep_dimensions(mep_elem)
-        if is_fire_wall:
+        if IS_WALL_TOOL and is_fire_wall:
             dia_mm = feet_to_mm(mep_dia)
             fire_offset_feet = mm_to_feet(25.0) if dia_mm < 1500.0 else mm_to_feet(50.0)
             target_dia = mep_dia + fire_offset_feet if mep_dia > 0 else 0.0
@@ -1105,13 +1281,13 @@ for mep_elem in mep_elements:
         target_w = target_dia
         target_h = target_dia
 
-    else:  # RECT (Rectangular Ducts & Rectangular Duct Accessories)
+    else:  # RECT
         prof_cfg = config["RECT"]
         symbol = prof_cfg["symbol"]
         offset_feet = prof_cfg["offset_feet"]
         ui_rotation_rad = prof_cfg["rotation_rad"]
         mep_w, mep_h, _ = get_mep_dimensions(mep_elem)
-        if is_fire_wall:
+        if IS_WALL_TOOL and is_fire_wall:
             max_dim_mm = feet_to_mm(max(mep_w, mep_h))
             fire_offset_feet = mm_to_feet(25.0) if max_dim_mm < 1500.0 else mm_to_feet(50.0)
             target_w = mep_w + fire_offset_feet if mep_w > 0 else 0.0
@@ -1126,14 +1302,19 @@ for mep_elem in mep_elements:
     elem_angle_rad = get_element_orientation_angle(mep_elem)
     target_rotation_rad = elem_angle_rad + ui_rotation_rad
 
-    for host_elem, host_solid, target_barrier in host_cache:
+    for host_elem, host_solid, host_min_z, host_max_z, nominal_host_thick in host_cache:
         placement_pt = None
+        local_min_z = None
+        local_max_z = None
+
         try:
             intersection_solid = DB.BooleanOperationsUtils.ExecuteBooleanOperation(
                 mep_solid, host_solid, DB.BooleanOperationsType.Intersect
             )
             if intersection_solid and intersection_solid.Volume > 0.00001:
                 placement_pt = intersection_solid.ComputeCentroid()
+                if IS_ROOF_TOOL:
+                    local_min_z, local_max_z = get_solid_z_bounds(intersection_solid)
         except Exception:
             pass
 
@@ -1141,7 +1322,31 @@ for mep_elem in mep_elements:
             if view_outline and not view_outline.Contains(placement_pt, 0.01):
                 continue
 
-            target_z = placement_pt.Z
+            align_mid_z = None
+            target_barrier = nominal_host_thick
+
+            if IS_ROOF_TOOL:
+                if local_min_z is not None and local_max_z is not None:
+                    align_mid_z = (local_min_z + local_max_z) / 2.0
+                    if target_barrier <= 0:
+                        target_barrier = local_max_z - local_min_z
+                else:
+                    align_mid_z = placement_pt.Z
+                target_z = align_mid_z
+
+            elif IS_CEILING_TOOL:
+                if host_min_z is not None and host_max_z is not None:
+                    align_mid_z = (host_min_z + host_max_z) / 2.0
+                    target_z = host_max_z
+                else:
+                    target_z = placement_pt.Z
+
+            elif IS_FLOOR_TOOL:
+                target_z = host_max_z if host_max_z is not None else (placement_pt.Z + target_barrier / 2.0)
+
+            else:  # WALL
+                target_z = placement_pt.Z
+
             target_level = get_mep_reference_level(mep_elem, target_z)
             if not target_level:
                 continue
@@ -1169,6 +1374,18 @@ for mep_elem in mep_elements:
                 width_changed = abs(cur_w - target_w) > 0.001 if target_w > 0 else False
                 height_changed = abs(cur_h - target_h) > 0.001 if target_h > 0 else False
 
+                extra_changed = False
+                if IS_FLOOR_TOOL:
+                    p_bund_w = existing_inst.LookupParameter("Bund_Width")
+                    p_bund_t = existing_inst.LookupParameter("Bund_Thickness")
+                    cur_bund_w = p_bund_w.AsDouble() if p_bund_w else 0.0
+                    cur_bund_t = p_bund_t.AsDouble() if p_bund_t else 0.0
+                    cur_z = existing_inst.Location.Point.Z if isinstance(existing_inst.Location, DB.LocationPoint) else 0.0
+                    elevation_changed = abs(cur_z - target_z) > 0.001
+                    bund_w_changed = abs(cur_bund_w - bund_width_feet) > 0.001 if bund_width_feet > 0 else False
+                    bund_t_changed = abs(cur_bund_t - bund_thickness_feet) > 0.001 if bund_thickness_feet >= 0 else False
+                    extra_changed = elevation_changed or bund_w_changed or bund_t_changed
+
                 rotation_changed = set_aligned_instance_rotation(existing_inst, placement_pt, target_rotation_rad)
 
                 if type_changed:
@@ -1176,10 +1393,19 @@ for mep_elem in mep_elements:
                 if p_lvl and not p_lvl.IsReadOnly and level_changed:
                     p_lvl.Set(target_level.Id)
 
-                set_elevation_from_level(existing_inst, target_level, target_z)
-                apply_penetration_parameters(existing_inst, target_barrier, target_w, target_h, target_dia)
+                if IS_WALL_TOOL or IS_FLOOR_TOOL:
+                    set_elevation_from_level(existing_inst, target_level, target_z)
 
-                if type_changed or level_changed or barrier_changed or dia_changed or width_changed or height_changed or rotation_changed:
+                apply_penetration_parameters(
+                    existing_inst, target_barrier, target_w, target_h, target_dia,
+                    bund_width_feet, bund_thickness_feet
+                )
+
+                z_aligned = False
+                if (IS_ROOF_TOOL or IS_CEILING_TOOL) and align_mid_z is not None:
+                    z_aligned = align_penetration_z_to_target_mid(existing_inst, align_mid_z)
+
+                if type_changed or level_changed or barrier_changed or dia_changed or width_changed or height_changed or rotation_changed or extra_changed or z_aligned:
                     updated_count += 1
                 else:
                     skipped_count += 1
@@ -1195,15 +1421,21 @@ for mep_elem in mep_elements:
 
                 set_elevation_from_level(inst, target_level, target_z)
                 set_aligned_instance_rotation(inst, place_xyz, target_rotation_rad)
-                apply_penetration_parameters(inst, target_barrier, target_w, target_h, target_dia)
+                apply_penetration_parameters(
+                    inst, target_barrier, target_w, target_h, target_dia,
+                    bund_width_feet, bund_thickness_feet
+                )
+
+                if (IS_ROOF_TOOL or IS_CEILING_TOOL) and align_mid_z is not None:
+                    align_penetration_z_to_target_mid(inst, align_mid_z)
 
                 placed_count += 1
 
 t.Commit()
 
 forms.alert(
-    "Wall Penetration Process Completed:\n\n"
+    "{} Penetration Process Completed:\n\n"
     "- Newly Placed: {}\n"
     "- Updated: {}\n"
-    "- Unchanged (Skipped): {}".format(placed_count, updated_count, skipped_count)
+    "- Unchanged (Skipped): {}".format(LOCKED_HOST_CATEGORY_NAME[:-1], placed_count, updated_count, skipped_count)
 )

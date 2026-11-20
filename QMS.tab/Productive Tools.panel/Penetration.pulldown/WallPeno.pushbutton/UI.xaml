@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WALL PENETRATION GENERATOR" Width="660" SizeToContent="Height"
+        Title="WALL PENETRATION GENERATOR" Width="680" SizeToContent="Height"
         MaxHeight="880" WindowStartupLocation="CenterScreen" ResizeMode="CanResizeWithGrip"
         Background="#F8F9FA" FontFamily="Segoe UI" Foreground="#333333">
     <Grid Margin="14">
@@ -43,12 +43,12 @@
                         <TextBlock Text="2. Elements to Process:" FontSize="11.5" FontWeight="Bold" Foreground="#333333" Margin="0,0,0,6"/>
                         <StackPanel Orientation="Horizontal">
                             <CheckBox Name="chk_EnableMep" Content="Ducts &amp; Pipes" IsChecked="True" Margin="0,0,14,0" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
-                            <CheckBox Name="chk_EnableAirTerminal" Content="Air Terminals" IsChecked="True" Margin="0,0,14,0" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
+                            <CheckBox Name="chk_EnableAirTerminal" Content="Air Terminals" IsChecked="False" Margin="0,0,14,0" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
                             <CheckBox Name="chk_EnableGenericModel" Content="Generic Models" IsChecked="False" FontSize="12" FontWeight="SemiBold" Foreground="#333333"/>
                         </StackPanel>
                         <Border Background="#EEF6FD" BorderBrush="#B8DAFF" BorderThickness="1" CornerRadius="4" Padding="8,6" Margin="0,8,0,0">
                             <StackPanel>
-                                <CheckBox Name="chk_FireWall" Content="Fire / Smoke / Acoustic Wall (Auto Rect Duct: &lt;1500mm = 25mm, &gt;=1500mm = 50mm)"
+                                <CheckBox Name="chk_FireWall" Content="Fire / Smoke / Acoustic Wall (Auto All Ducts &amp; DA: &lt;1500mm = 25mm, &gt;=1500mm = 50mm)"
                                           IsChecked="False" FontSize="11" FontWeight="SemiBold" Foreground="#333333"/>
                                 <TextBlock Text="NOTE: Please update family types to suit"
                                            FontSize="10.5" FontWeight="Bold" FontStyle="Italic" Foreground="#C0392B" Margin="20,3,0,0"/>
@@ -68,22 +68,21 @@
                                 <ColumnDefinition Width="108"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="116"/>
-                                <ColumnDefinition Width="92"/>
+                                <ColumnDefinition Width="106"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <TextBlock Text="Element Type" Grid.Row="0" Grid.Column="0" FontWeight="Bold" FontSize="11" Foreground="#333333" Margin="0,0,4,6"/>
                             <TextBlock Text="Penetration Family Types (Type to search)" Grid.Row="0" Grid.Column="1" FontWeight="Bold" FontSize="11" Foreground="#333333" Margin="0,0,6,6"/>
                             <TextBlock Text="Overall Offset (mm)" Grid.Row="0" Grid.Column="2" FontWeight="Bold" FontSize="11" Foreground="#333333" Margin="0,0,6,6"/>
                             <TextBlock Text="Rotation" Grid.Row="0" Grid.Column="3" FontWeight="Bold" FontSize="11" Foreground="#333333" Margin="0,0,0,6"/>
-
                             <TextBlock Text="Rect Ducts &amp; DA" Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
                             <ComboBox Name="cb_SymbolRect" Grid.Row="1" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
                             <TextBox Name="tb_OffsetRect" Text="100" Grid.Row="1" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
@@ -91,7 +90,6 @@
                                 <ComboBoxItem Content="0°"/>
                                 <ComboBoxItem Content="90° (Default)" IsSelected="True"/>
                             </ComboBox>
-
                             <TextBlock Text="Round Ducts &amp; DA" Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
                             <ComboBox Name="cb_SymbolRoundDuct" Grid.Row="2" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
                             <TextBox Name="tb_OffsetRoundDuct" Text="100" Grid.Row="2" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
@@ -99,7 +97,6 @@
                                 <ComboBoxItem Content="0°"/>
                                 <ComboBoxItem Content="90° (Default)" IsSelected="True"/>
                             </ComboBox>
-
                             <TextBlock Text="Round Pipes" Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
                             <ComboBox Name="cb_SymbolPipe" Grid.Row="3" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
                             <TextBox Name="tb_OffsetPipe" Text="10" Grid.Row="3" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
@@ -107,7 +104,6 @@
                                 <ComboBoxItem Content="0°"/>
                                 <ComboBoxItem Content="90° (Default)" IsSelected="True"/>
                             </ComboBox>
-
                             <TextBlock Text="Air Terminal (Rect)" Grid.Row="4" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
                             <ComboBox Name="cb_SymbolAirTerminalRect" Grid.Row="4" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
                             <TextBox Name="tb_OffsetAirTerminal" Text="10" Grid.Row="4" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
@@ -115,7 +111,6 @@
                                 <ComboBoxItem Content="0°"/>
                                 <ComboBoxItem Content="90° (Default)" IsSelected="True"/>
                             </ComboBox>
-
                             <TextBlock Text="Air Terminal (Swirl)" Grid.Row="5" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,5"/>
                             <ComboBox Name="cb_SymbolAirTerminalRound" Grid.Row="5" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,5" IsEditable="True" IsTextSearchEnabled="False"/>
                             <TextBox Name="tb_OffsetAirTerminalRound" Text="10" Grid.Row="5" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,5"/>
@@ -123,7 +118,6 @@
                                 <ComboBoxItem Content="0°"/>
                                 <ComboBoxItem Content="90° (Default)" IsSelected="True"/>
                             </ComboBox>
-
                             <TextBlock Text="Generic Models" Grid.Row="6" Grid.Column="0" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold" Foreground="#333333" Margin="0,0,4,0"/>
                             <ComboBox Name="cb_SymbolGenericModel" Grid.Row="6" Grid.Column="1" Height="25" VerticalContentAlignment="Center" Foreground="#333333" Margin="0,0,6,0" IsEditable="True" IsTextSearchEnabled="False"/>
                             <TextBox Name="tb_OffsetGenericModel" Text="10" Grid.Row="6" Grid.Column="2" Height="25" VerticalContentAlignment="Center" Padding="4,0" Foreground="#333333" Margin="0,0,6,0"/>
